@@ -2,10 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { makeDemoAnalysis } from "@/lib/analysisText";
+import { makeDemoAnalysis, type AnalysisResult } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
 
-/* ← ここは今あなたが貼ってくれたコードそのままでOK */
 function typeLabel(type: string | null) {
   switch (type) {
     case "1": return "Ⅰ 前伸傾向";
@@ -37,12 +36,13 @@ function Bar({ label, value }: { label: string; value: number }) {
   );
 }
 
-export default function AnalyzeClient() {
+export default function AnalyzeClient({ type }: { type: string }) {
   const sp = useSearchParams();
   const router = useRouter();
 
-  const typeStr = sp.get("type");      // "1"〜"4"
-  const movie = sp.get("movie") || ""; // /uploads/xxx.mov
+  // ✅ type は「/analyze/[type]」のパスから来る
+  const typeStr = type;              // "1"〜"4"
+  const movie = sp.get("movie") || ""; // ?movie=...
 
   const typeNum = useMemo(() => {
     const n = Number(typeStr);
@@ -54,7 +54,7 @@ export default function AnalyzeClient() {
 
   const runDemo = async () => {
     if (!typeNum) {
-      alert("type が取れてない！ /analyze?type=2&movie=/uploads/... の形か確認して");
+      alert("type が不正！ /analyze/1〜4 の形か確認して");
       return;
     }
     setLoading(true);
@@ -99,7 +99,7 @@ export default function AnalyzeClient() {
             />
           ) : (
             <div style={{ opacity: 0.8, fontSize: 13 }}>
-              movie が空です（/analyze?type=2&movie=/uploads/... の形で来てるか確認）
+              movie が空です（/analyze/3?movie=... の形で来てるか確認）
             </div>
           )}
         </div>
