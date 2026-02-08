@@ -7,41 +7,22 @@ import { addHistory } from "@/lib/history";
 
 function typeLabel(type: string | null) {
   switch (type) {
-    case "1":
-      return "Ⅰ 前伸傾向";
-    case "2":
-      return "Ⅱ 前沈傾向";
-    case "3":
-      return "Ⅲ 後伸傾向";
-    case "4":
-      return "Ⅳ 後沈傾向";
-    default:
-      return "未選択";
+    case "1": return "Ⅰ 前伸傾向";
+    case "2": return "Ⅱ 前沈傾向";
+    case "3": return "Ⅲ 後伸傾向";
+    case "4": return "Ⅳ 後沈傾向";
+    default: return "未選択";
   }
 }
 
 function Bar({ label, value }: { label: string; value: number }) {
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: 12,
-          opacity: 0.85,
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.85 }}>
         <span>{label}</span>
         <span>{value}</span>
       </div>
-      <div
-        style={{
-          height: 10,
-          borderRadius: 999,
-          background: "rgba(255,255,255,0.12)",
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
         <div
           style={{
             width: `${Math.max(0, Math.min(100, value))}%`,
@@ -59,12 +40,12 @@ export default function AnalyzeClient() {
   const sp = useSearchParams();
   const router = useRouter();
 
-  const typeStr = sp.get("type"); // "1"〜"4"
+  const typeStr = sp.get("type");      // "1"〜"4"
   const movie = sp.get("movie") || ""; // /uploads/xxx.mov
 
   const typeNum = useMemo(() => {
     const n = Number(typeStr);
-    return n === 1 || n === 2 || n === 3 || n === 4 ? n : null;
+    return (n === 1 || n === 2 || n === 3 || n === 4) ? n : null;
   }, [typeStr]);
 
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -83,9 +64,9 @@ export default function AnalyzeClient() {
       type: typeNum,
       src: movie,
       score: r.score,
-      comment: r.summary, // A
-      drill: r.nextDrill, // A
-      breakdown: r.breakdown, // B
+      comment: r.summary,
+      drill: r.nextDrill,
+      breakdown: r.breakdown,
     });
 
     setResult(r);
@@ -109,7 +90,12 @@ export default function AnalyzeClient() {
         >
           <div style={{ fontWeight: 800, marginBottom: 6 }}>動画</div>
           {movie ? (
-            <video src={movie} controls playsInline style={{ width: "100%", borderRadius: 12 }} />
+            <video
+              src={movie}
+              controls
+              playsInline
+              style={{ width: "100%", borderRadius: 12 }}
+            />
           ) : (
             <div style={{ opacity: 0.8, fontSize: 13 }}>
               movie が空です（/analyze?type=2&movie=/uploads/... の形で来てるか確認）
@@ -129,13 +115,19 @@ export default function AnalyzeClient() {
 
         {result && (
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>スコア：{result.score}</div>
+            <div style={{ fontWeight: 900, fontSize: 18 }}>
+              スコア：{result.score}
+            </div>
 
             <div style={{ marginTop: 10, fontWeight: 900 }}>コーチコメント（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>{result.summary}</div>
+            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>
+              {result.summary}
+            </div>
 
             <div style={{ marginTop: 10, fontWeight: 900 }}>次の宿題（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>{result.nextDrill}</div>
+            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>
+              {result.nextDrill}
+            </div>
 
             <div
               style={{

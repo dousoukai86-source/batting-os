@@ -1,11 +1,10 @@
+// src/app/analyze/page.tsx
 import { Suspense } from "react";
 import AnalyzeClient from "./AnalyzeClient";
 
-export const dynamic = "force-dynamic";
-
-export default function AnalyzePage() {
+export default function Page() {
   return (
-    <Suspense fallback={<div style={{ padding: 20 }}>読み込み中...</div>}>
+    <Suspense fallback={<div>読み込み中...</div>}>
       <AnalyzeClient />
     </Suspense>
   );
