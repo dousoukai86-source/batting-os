@@ -1,10 +1,13 @@
 "use client";
 
+"use client";
+
 import { useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { makeDemoAnalysis, type AnalysisResult } from "@/lib/analysisText";
+import { makeDemoAnalysis } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
 
+/* ← ここは今あなたが貼ってくれたコードそのままでOK */
 function typeLabel(type: string | null) {
   switch (type) {
     case "1": return "Ⅰ 前伸傾向";
