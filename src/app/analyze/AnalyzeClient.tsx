@@ -1,7 +1,5 @@
 "use client";
 
-"use client";
-
 import { useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { makeDemoAnalysis } from "@/lib/analysisText";
