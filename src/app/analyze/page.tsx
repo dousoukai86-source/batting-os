@@ -1,11 +1,11 @@
+export const dynamic = "force-dynamic";
+
 import { Suspense } from "react";
 import AnalyzeClient from "./AnalyzeClient";
 
-export const dynamic = "force-dynamic";
-
 export default function Page() {
   return (
-    <Suspense fallback={<div style={{ padding: 16 }}>Loading...</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
       <AnalyzeClient />
     </Suspense>
   );
