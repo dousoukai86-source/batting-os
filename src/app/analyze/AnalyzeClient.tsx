@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { makeDemoAnalysis, type AnalysisResult } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
 
-function typeLabel(type: string | null) {
+function typeLabel(type: string) {
   switch (type) {
     case "1": return "Ⅰ 前伸傾向";
     case "2": return "Ⅱ 前沈傾向";
@@ -18,17 +18,17 @@ function typeLabel(type: string | null) {
 function Bar({ label, value }: { label: string; value: number }) {
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.85 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
         <span>{label}</span>
         <span>{value}</span>
       </div>
-      <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
+      <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.2)" }}>
         <div
           style={{
-            width: `${Math.max(0, Math.min(100, value))}%`,
+            width: `${value}%`,
             height: "100%",
             borderRadius: 999,
-            background: "rgba(255,255,255,0.75)",
+            background: "#fff",
           }}
         />
       </div>
@@ -39,150 +39,68 @@ function Bar({ label, value }: { label: string; value: number }) {
 export default function AnalyzeClient({ type }: { type: string }) {
   const sp = useSearchParams();
   const router = useRouter();
-
-  // ✅ type は「/analyze/[type]」のパスから来る
-  const typeStr = type;              // "1"〜"4"
-  const movie = sp.get("movie") || ""; // ?movie=...
-
-  const typeNum = useMemo(() => {
-    const n = Number(typeStr);
-    return (n === 1 || n === 2 || n === 3 || n === 4) ? n : null;
-  }, [typeStr]);
+  const movie = sp.get("movie");
 
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const runDemo = async () => {
-    if (!typeNum) {
-      alert("type が不正！ /analyze/1〜4 の形か確認して");
-      return;
-    }
+  const runDemo = () => {
     setLoading(true);
-
-    const r = makeDemoAnalysis(typeNum);
-
+    const r = makeDemoAnalysis(Number(type));
     addHistory({
-      type: typeNum,
-      src: movie,
+      type: Number(type),
+      src: movie ?? "",
       score: r.score,
       comment: r.summary,
       drill: r.nextDrill,
       breakdown: r.breakdown,
     });
-
     setResult(r);
     setLoading(false);
   };
 
   return (
-    <main>
-      <div className="page">
-        <div className="title">解析</div>
-        <div className="desc">カテゴリ：{typeLabel(typeStr)}</div>
+    <main className="page">
+      <h1>解析</h1>
+      <p>カテゴリ：{typeLabel(type)}</p>
 
-        <div
-          style={{
-            padding: 14,
-            borderRadius: 14,
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.1)",
-            marginBottom: 12,
-          }}
-        >
-          <div style={{ fontWeight: 800, marginBottom: 6 }}>動画</div>
-          {movie ? (
-            <video
-              src={movie}
-              controls
-              playsInline
-              style={{ width: "100%", borderRadius: 12 }}
-            />
-          ) : (
-            <div style={{ opacity: 0.8, fontSize: 13 }}>
-              movie が空です（/analyze/3?movie=... の形で来てるか確認）
-            </div>
-          )}
-        </div>
+      {/* 🎥 live-camera のときは動画を出さない */}
+      {movie !== "live-camera" && movie && (
+        <video
+          src={movie}
+          controls
+          playsInline
+          style={{ width: "100%", borderRadius: 12 }}
+        />
+      )}
 
-        <button
-          type="button"
-          className="cta"
-          onClick={runDemo}
-          disabled={loading}
-          style={{ opacity: loading ? 0.7 : 1 }}
-        >
-          {loading ? "解析中..." : "解析を実行（デモ）"}
-        </button>
+      <button className="cta" onClick={runDemo} disabled={loading}>
+        {loading ? "解析中…" : "解析を実行（デモ）"}
+      </button>
 
-        {result && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>
-              スコア：{result.score}
-            </div>
+      {result && (
+        <>
+          <h2>スコア：{result.score}</h2>
 
-            <div style={{ marginTop: 10, fontWeight: 900 }}>コーチコメント（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>
-              {result.summary}
-            </div>
+          <h3>コーチコメント</h3>
+          <p>{result.summary}</p>
 
-            <div style={{ marginTop: 10, fontWeight: 900 }}>次の宿題（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>
-              {result.nextDrill}
-            </div>
+          <h3>次の宿題</h3>
+          <p>{result.nextDrill}</p>
 
-            <div
-              style={{
-                marginTop: 14,
-                padding: 14,
-                borderRadius: 14,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            >
-              <div style={{ fontWeight: 900, marginBottom: 10 }}>数値（B）</div>
-
-              <div style={{ display: "grid", gap: 10 }}>
-                <Bar label="姿勢" value={result.breakdown.posture} />
-                <Bar label="体重移動" value={result.breakdown.weight} />
-                <Bar label="インパクト" value={result.breakdown.impact} />
-                <Bar label="再現性" value={result.breakdown.repeat} />
-                <Bar label="タイミング" value={result.breakdown.timing} />
-              </div>
-            </div>
+          <div style={{ display: "grid", gap: 10 }}>
+            <Bar label="姿勢" value={result.breakdown.posture} />
+            <Bar label="体重移動" value={result.breakdown.weight} />
+            <Bar label="インパクト" value={result.breakdown.impact} />
+            <Bar label="再現性" value={result.breakdown.repeat} />
+            <Bar label="タイミング" value={result.breakdown.timing} />
           </div>
-        )}
+        </>
+      )}
 
-        <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => router.push("/history")}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#fff",
-              padding: "10px 12px",
-              borderRadius: 12,
-            }}
-          >
-            履歴を見る
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#fff",
-              padding: "10px 12px",
-              borderRadius: 12,
-            }}
-          >
-            トップへ戻る
-          </button>
-        </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+        <button onClick={() => router.push("/history")}>履歴を見る</button>
+        <button onClick={() => router.push("/")}>トップへ戻る</button>
       </div>
     </main>
   );
