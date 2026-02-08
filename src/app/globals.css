@@ -1,0 +1,174 @@
+/* =========================
+   Global Reset
+========================= */
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #0b0e13;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", sans-serif;
+}
+
+/* =========================
+   Background Logo (Watermark)
+========================= */
+body {
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-image: url("/bg-logo.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: min(70vw, 520px);
+  opacity: 0.04;            /* ← 基本は薄く */
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* =========================
+   Page Base
+========================= */
+main {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+/* =========================
+   Analyze Page 専用（超重要）
+========================= */
+main.analyze {
+  background: #0b0e13;
+}
+
+/* 解析ページではロゴをほぼ消す */
+body:has(main.analyze)::before {
+  opacity: 0.015; /* ← 見えたら 0 にしてOK */
+}
+
+/* =========================
+   Readable Card UI
+========================= */
+.card,
+.panel,
+.box,
+.result,
+.score,
+.breakdown,
+.comment,
+section {
+  background: rgba(18, 22, 30, 0.94);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 18px;
+  padding: 14px;
+  margin-bottom: 14px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.45);
+}
+
+/* =========================
+   Typography
+========================= */
+h1, h2, h3 {
+  margin: 0 0 8px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+p {
+  margin: 0 0 8px;
+  color: rgba(255,255,255,0.9);
+}
+
+small,
+.muted {
+  color: rgba(255,255,255,0.7);
+}
+
+/* スコア強調 */
+.total,
+.scoreNum,
+.big {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+}
+
+/* =========================
+   Buttons
+========================= */
+button {
+  appearance: none;
+  border: none;
+  border-radius: 16px;
+  padding: 14px;
+  font-weight: 800;
+  color: #fff;
+  background: #2f80ff;
+}
+
+button.secondary {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+/* =========================
+   List / History
+========================= */
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(18,22,30,0.94);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+
+.rowTitle {
+  font-weight: 700;
+}
+
+.rowSub {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* =========================
+   Matrix
+========================= */
+.matrix {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cell {
+  height: 120px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.red { background: #ff5a5a; }
+.green { background: #32d26c; }
+.blue { background: #4da3ff; }
+.yellow { background: #ffd84d; }

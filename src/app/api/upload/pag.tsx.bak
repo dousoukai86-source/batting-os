@@ -1,0 +1,43 @@
+"use client";
+
+import { useRouter, useSearchParams } from "next/navigation";
+import { useState } from "react";
+
+export default function UploadPage() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const cat = sp.get("cat") ?? "II";
+
+  const [file, setFile] = useState<File | null>(null);
+
+  async function send() {
+    if (!file) return;
+
+    const fd = new FormData();
+    fd.append("file", file);
+
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      body: fd,
+    });
+
+    const data = await res.json();
+    router.push(`/analyze?src=${data.src}&cat=${cat}`);
+  }
+
+  return (
+    <div>
+      <h1>アップロード（カテゴリ {cat}）</h1>
+
+      <input
+        type="file"
+        accept="video/*"
+        onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+      />
+
+      <button onClick={send} disabled={!file}>
+        送信する（解析へ）
+      </button>
+    </div>
+  );
+}
