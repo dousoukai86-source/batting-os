@@ -100,8 +100,8 @@ export function makeDemoAnalysis(type: CatId): AnalysisResult {
   return {
     type,
     score,
-    summary: pick(A[type].summary),
-    nextDrill: pick(A[type].drill),
+    summary: pick([...A[type].summary]),
+nextDrill: pick([...A[type].drill]),
     breakdown,
   };
 }
