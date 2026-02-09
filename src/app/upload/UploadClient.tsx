@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function catLabelFromCategory(category: string | null) {
@@ -18,10 +18,10 @@ function catLabelFromCategory(category: string | null) {
   }
 }
 
-export default function UploadPage() {
+export default function UploadClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const category = searchParams.get("category");
+  const category = searchParams.get("category"); // "1"〜"4" or null
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -33,11 +33,10 @@ export default function UploadPage() {
 
   // 🎥 カメラ起動
   const startCamera = async () => {
+    setError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment", // スマホは背面カメラ
-        },
+        video: { facingMode: "environment" }, // スマホは背面カメラ
         audio: false,
       });
 
@@ -48,7 +47,7 @@ export default function UploadPage() {
       setCameraOn(true);
     } catch (e) {
       console.error(e);
-      setError("カメラを起動できませんでした");
+      setError("カメラを起動できませんでした（許可が必要です）");
     }
   };
 
@@ -59,13 +58,13 @@ export default function UploadPage() {
     };
   }, []);
 
-  const goAnalyze = () => {
-    if (!category) {
-      alert("カテゴリが取れてない！");
-      return;
-    }
-    router.push(`/analyze/${category}?movie=live-camera`);
-  };
+ const goAnalyze = () => {
+  if (!category) {
+    alert("カテゴリが取れてない！");
+    return;
+  }
+  router.push(`/analyze/${category}?movie=live-camera`);
+};
 
   return (
     <main>
@@ -128,6 +127,7 @@ export default function UploadPage() {
             type="button"
             className="cta"
             onClick={goAnalyze}
+            // カメラONじゃないと押せない（今まで通り）
             disabled={!cameraOn}
             style={{
               opacity: cameraOn ? 1 : 0.5,
