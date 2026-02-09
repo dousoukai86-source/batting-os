@@ -1,55 +1,62 @@
 // src/lib/history.ts
-export type Breakdown = {
-  posture: number; // 姿勢
-  weight: number;  // 体重移動
-  impact: number;  // インパクト
-  repeat: number;  // 再現性
-  timing: number;  // タイミング
-};
 
 export type HistoryItem = {
   id: string;
-  createdAt: string; // ISO
+  createdAt: number;
   type: 1 | 2 | 3 | 4;
-  src: string;
+
+  // A（文章）
+  comment?: string; // 解析コメント
+  drill?: string;   // 次の宿題
+
+  // B（数値）
   score?: number;
-  comment?: string; // A：コーチ文
-  drill?: string;   // A：次の宿題
-  breakdown?: Breakdown; // B：数値
+  breakdown?: {
+    posture: number; // 姿勢
+    weight: number;  // 体重移動
+    impact: number;  // インパクト
+    repeat: number;  // 再現性
+    timing: number;  // タイミング
+  };
+
+  // 元動画の参照（URL or "live-camera" など）
+  src?: string;
 };
 
-const KEY = "batting-os:history";
+const KEY = "batting_os_history";
 
-function makeId() {
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function safeParse<T>(v: string | null): T | null {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
 }
 
 export function getHistory(): HistoryItem[] {
   if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as HistoryItem[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-export function setHistory(items: HistoryItem[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(items));
-}
-
-export function addHistory(item: Omit<HistoryItem, "id" | "createdAt">) {
-  const now = new Date().toISOString();
-  const next: HistoryItem = { id: makeId(), createdAt: now, ...item };
-  const list = getHistory();
-  setHistory([next, ...list]);
-  return next;
+  const raw = localStorage.getItem(KEY);
+  const parsed = safeParse<HistoryItem[]>(raw);
+  return Array.isArray(parsed) ? parsed : [];
 }
 
 export function clearHistory() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(KEY);
+}
+
+export function addHistory(item: Omit<HistoryItem, "id" | "createdAt">) {
+  if (typeof window === "undefined") return;
+
+  const cur = getHistory();
+
+  const next: HistoryItem = {
+    id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: Date.now(),
+    ...item,
+  };
+
+  // 新しい順で先頭に積む
+  localStorage.setItem(KEY, JSON.stringify([next, ...cur]));
 }
