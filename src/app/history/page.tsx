@@ -105,27 +105,27 @@ export default function HistoryPage() {
                 </div>
               )}
 
-              {/* 再解析へ（同じタイプで飛べる） */}
-              <div style={{ marginTop: 12 }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const movie = it.src || "/uploads/demo.mov";
-                    router.push(`/analyze?type=${it.type}&movie=${encodeURIComponent(movie)}`);
-                  }}
-                  style={{
-                    width: "100%",
-                    background: "transparent",
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    color: "#fff",
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    fontWeight: 800,
-                  }}
-                >
-                  この履歴のタイプで解析ページへ
-                </button>
-              </div>
+             {/* 再解析へ（同じタイプで飛べる） */}
+<div style={{ marginTop: 12 }}>
+ <button
+  type="button"
+  onClick={() => {
+    const movie = it.src || "/uploads/demo.mov";
+    router.push(`/analyze/${it.type}?movie=${encodeURIComponent(movie)}`);
+  }}
+  style={{
+    width: "100%",
+    background: "transparent",
+    border: "1px solid rgba(255,255,255,0.25)",
+    color: "#fff",
+    padding: "10px 12px",
+    borderRadius: 12,
+    fontWeight: 800,
+  }}
+>
+  この履歴のタイプで解析ページへ
+</button>
+</div>
             </div>
           ))}
         </div>
