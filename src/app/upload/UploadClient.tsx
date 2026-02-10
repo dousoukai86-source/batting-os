@@ -91,15 +91,18 @@ export default function UploadClient() {
 
   // ✅ 解析へ進む（デモ）— ここが “トップ戻り” を止める本体
   const goAnalyze = () => {
-    if (!type) {
-      alert("カテゴリが取得できていません。トップから選び直してください。");
-      router.replace("/");
-      return;
-    }
+  const categoryRaw = sp.get("category");
+  const t = toCatId(categoryRaw);
 
-    // movie はとりあえず live-camera として渡す（後で本物の動画に差し替えOK）
-    router.push(`/analyze/${type}?movie=live-camera`);
-  };
+  if (!t) {
+    alert("カテゴリが取得できていません。トップから選び直してください。");
+    router.replace("/");
+    return;
+  }
+
+  // ✅ 必ず /analyze/1..4 に飛ぶ（/analyze?category=... は使わない）
+  router.push(`/analyze/${t}?movie=live-camera`);
+};
 
   return (
     <main>
