@@ -1,212 +1,140 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { makeDemoAnalysis, type AnalysisResult } from "@/lib/analysisText";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { makeDemoAnalysis, type CatId } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
 
-function typeLabel(type: string | null) {
-  switch (type) {
-    case "1": return "Ⅰ 前伸傾向";
-    case "2": return "Ⅱ 前沈傾向";
-    case "3": return "Ⅲ 後伸傾向";
-    case "4": return "Ⅳ 後沈傾向";
-    default: return "未選択";
-  }
+type Props = {
+  type: string; // route param: /analyze/[type]
+};
+
+function toCatId(v: string | null | undefined): CatId | null {
+  const n = Number(v);
+  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
+  return null;
 }
 
-function Bar({ label, value }: { label: string; value: number }) {
-  return (
-    <div style={{ display: "grid", gap: 6 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.85 }}>
-        <span>{label}</span>
-        <span>{value}</span>
-      </div>
-      <div style={{ height: 10, borderRadius: 999, background: "rgba(255,255,255,0.12)", overflow: "hidden" }}>
-        <div
-          style={{
-            width: `${Math.max(0, Math.min(100, value))}%`,
-            height: "100%",
-            borderRadius: 999,
-            background: "rgba(255,255,255,0.75)",
-          }}
-        />
-      </div>
-    </div>
-  );
+function typeLabel(type: CatId) {
+  return type === 1
+    ? "Ⅰ 前伸傾向"
+    : type === 2
+    ? "Ⅱ 前沈傾向"
+    : type === 3
+    ? "Ⅲ 後伸傾向"
+    : "Ⅳ 後沈傾向";
 }
 
-export default function AnalyzeClient() {
+export default function AnalyzeClient({ type }: Props) {
   const router = useRouter();
   const sp = useSearchParams();
-  const params = useParams<{ type: string }>();
 
-  // ✅ ここが超重要：/analyze/3 の「3」を読む
-  const typeStr = params?.type ?? null;
+  // ✅ ルート param の type を「1〜4」に正規化
+  const cat = useMemo(() => toCatId(type), [type]);
 
-  // movie はクエリから読む（?movie=...）
-  const movie = sp.get("movie") || "";
+  // ✅ movie は query で受け取る（なくてもOK）
+  const movie = useMemo(() => {
+    const m = sp.get("movie");
+    // live-camera など文字列も来る想定。とりあえずそのまま保持
+    return m ?? "live-camera";
+  }, [sp]);
 
-  const typeNum = useMemo(() => {
-    const n = Number(typeStr);
-    return n === 1 || n === 2 || n === 3 || n === 4 ? n : null;
-  }, [typeStr]);
+  // video 表示用（必要なら使う）
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  // 表示だけ（カテゴリ未選択に見えないようにする）
+  const categoryText = useMemo(() => {
+    if (!cat) return "未選択";
+    return typeLabel(cat);
+  }, [cat]);
 
-  const runDemo = async () => {
-    if (!typeNum) {
-      alert("type が不正です（URLが /analyze/1 の形になってるか確認して）");
-      return;
-    }
-    setLoading(true);
+  // ✅ type が不正なら、アラートじゃなくてトップへ戻す（これで “typeが不正” ダイアログ消える）
+  useEffect(() => {
+    if (!cat) router.replace("/");
+  }, [cat, router]);
 
-    const r = makeDemoAnalysis(typeNum);
+  const [toast, setToast] = useState<string | null>(null);
 
-    // ✅ 履歴保存（A/B両方）
+  const runDemo = () => {
+    if (!cat) return;
+
+    const res = makeDemoAnalysis(cat);
+
+    // ✅ 履歴へ保存（movie も一緒に持たせる）
     addHistory({
-      type: typeNum,
-      src: movie,
-      score: r.score,
-      comment: r.summary,
-      drill: r.nextDrill,
-      breakdown: r.breakdown,
+      type: res.type,
+      score: res.score,
+      comment: res.summary,   // A
+      drill: res.nextDrill,   // A
+      breakdown: res.breakdown, // B
+      src: movie === "live-camera" ? "live-camera" : movie,
     });
 
-    setResult(r);
-    setLoading(false);
+    // ✅ デモ実行後は必ず履歴へ遷移（「実行しました」だけで止まらない）
+    router.push("/history");
   };
-
-  const isLiveCamera = movie === "live-camera";
 
   return (
     <main>
       <div className="page">
         <div className="title">解析</div>
-        <div className="desc">カテゴリ：{typeLabel(typeStr)}</div>
+        <div className="desc">カテゴリ：{categoryText}</div>
 
-        {/* ✅ live-camera のときは video を出さない */}
-        {!isLiveCamera && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ marginBottom: 8, opacity: 0.9, fontWeight: 800 }}>動画</div>
+
+          {/* デモ用表示（カメラ/動画の実装は後でOK） */}
           <div
             style={{
-              padding: 14,
-              borderRadius: 14,
+              width: "100%",
+              aspectRatio: "16/9",
+              borderRadius: 16,
               background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              marginBottom: 12,
+              border: "1px solid rgba(255,255,255,0.12)",
+              display: "grid",
+              placeItems: "center",
+              color: "rgba(255,255,255,0.75)",
+              fontWeight: 900,
             }}
           >
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>動画</div>
-            {movie ? (
-              <video
-                src={movie}
-                controls
-                playsInline
-                style={{ width: "100%", borderRadius: 12 }}
-              />
-            ) : (
-              <div style={{ opacity: 0.8, fontSize: 13 }}>
-                movie が空です（?movie=/uploads/... の形で来てるか確認）
-              </div>
-            )}
+            カメラは起動しています（デモ解析用）
           </div>
-        )}
 
-        {isLiveCamera && (
-          <div
-            style={{
-              padding: 14,
-              borderRadius: 14,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              marginBottom: 12,
-            }}
-          >
-            <div style={{ fontWeight: 800, marginBottom: 6 }}>動画</div>
-            <div style={{ opacity: 0.85, fontSize: 13 }}>
-              live-camera（撮影中の映像）はこのデモでは保存されません。<br />
-              解析は「デモ結果」を表示します。
-            </div>
-          </div>
-        )}
+          {/* 必要なら後で video を繋ぐ
+          <video ref={videoRef} controls playsInline style={{ width: "100%", borderRadius: 16 }} />
+          */}
+        </div>
 
         <button
           type="button"
           className="cta"
           onClick={runDemo}
-          disabled={loading}
-          style={{ opacity: loading ? 0.7 : 1 }}
+          style={{ marginTop: 14 }}
+          disabled={!cat}
         >
-          {loading ? "解析中..." : "解析を実行（デモ）"}
+          解析を実行（デモ）
         </button>
 
-        {result && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontWeight: 900, fontSize: 18 }}>
-              スコア：{result.score}
-            </div>
+        <button
+          type="button"
+          onClick={() => router.push("/")}
+          style={{
+            marginTop: 12,
+            width: "100%",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.25)",
+            color: "#fff",
+            padding: "12px",
+            borderRadius: 16,
+            fontWeight: 800,
+          }}
+        >
+          トップへ戻る
+        </button>
 
-            <div style={{ marginTop: 10, fontWeight: 900 }}>コーチコメント（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>{result.summary}</div>
-
-            <div style={{ marginTop: 10, fontWeight: 900 }}>次の宿題（A）</div>
-            <div style={{ opacity: 0.92, whiteSpace: "pre-wrap" }}>{result.nextDrill}</div>
-
-            <div
-              style={{
-                marginTop: 14,
-                padding: 14,
-                borderRadius: 14,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            >
-              <div style={{ fontWeight: 900, marginBottom: 10 }}>数値（B）</div>
-              <div style={{ display: "grid", gap: 10 }}>
-                <Bar label="姿勢" value={result.breakdown.posture} />
-                <Bar label="体重移動" value={result.breakdown.weight} />
-                <Bar label="インパクト" value={result.breakdown.impact} />
-                <Bar label="再現性" value={result.breakdown.repeat} />
-                <Bar label="タイミング" value={result.breakdown.timing} />
-              </div>
-            </div>
-          </div>
+        {toast && (
+          <div style={{ marginTop: 10, opacity: 0.85, fontSize: 12 }}>{toast}</div>
         )}
-
-        <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
-          <button
-            type="button"
-            onClick={() => router.push("/history")}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#fff",
-              padding: "10px 12px",
-              borderRadius: 12,
-              fontWeight: 800,
-            }}
-          >
-            履歴を見る
-          </button>
-
-          <button
-            type="button"
-            onClick={() => router.push("/")}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#fff",
-              padding: "10px 12px",
-              borderRadius: 12,
-              fontWeight: 800,
-            }}
-          >
-            トップへ戻る
-          </button>
-        </div>
       </div>
     </main>
   );
