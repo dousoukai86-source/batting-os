@@ -1,16 +1,45 @@
-// src/app/analyze/AnalyzeClient.tsx
 "use client";
 
-import { useMemo, useState } from "react";
+// src/app/analyze/AnalyzeClient.tsx
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { makeDemoAnalysis, type CatId, type AnalysisResult } from "@/lib/analysisText";
+import { makeDemoAnalysis, type CatId } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
 
 type Props = {
-  type: 1 | 2 | 3 | 4; // ✅ サーバーから数字で渡す前提に合わせる
+  type: string; // route param: /analyze/[type]
 };
 
-function typeLabel(type: 1 | 2 | 3 | 4) {
+/** 何が来ても 1〜4 に寄せる（"4" / "IV" / "Ⅳ" / "IV 後沈傾向" など全部OK） */
+function toCatId(v: string | null | undefined): CatId | null {
+  if (!v) return null;
+
+  // "IV 後沈傾向" みたいなのも来るので、先頭トークンだけ抜く
+  const raw = v.trim();
+  const first = raw.split(/[\s　]/)[0].toUpperCase(); // 半角/全角スペース対応
+
+  // 数字
+  if (first === "1") return 1;
+  if (first === "2") return 2;
+  if (first === "3") return 3;
+  if (first === "4") return 4;
+
+  // ローマ数字（ASCII）
+  if (first === "I") return 1;
+  if (first === "II") return 2;
+  if (first === "III") return 3;
+  if (first === "IV") return 4;
+
+  // ローマ数字（全角）
+  if (first === "Ⅰ") return 1;
+  if (first === "Ⅱ") return 2;
+  if (first === "Ⅲ") return 3;
+  if (first === "Ⅳ") return 4;
+
+  return null;
+}
+
+function typeLabel(type: CatId) {
   return type === 1
     ? "Ⅰ 前伸傾向"
     : type === 2
@@ -24,31 +53,40 @@ export default function AnalyzeClient({ type }: Props) {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // ✅ movie はクエリで受け取る（なくてもOK）
+  // ✅ route param の type を「1〜4」に正規化（IVでもOK）
+  const cat = useMemo(() => toCatId(type), [type]);
+
+  // ✅ movie は query で受け取る（なくてもOK）
   const movie = useMemo(() => sp.get("movie") ?? "live-camera", [sp]);
 
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  const runDemo = async () => {
-    setLoading(true);
+  const categoryText = useMemo(() => {
+    if (!cat) return "未選択";
+    return typeLabel(cat);
+  }, [cat]);
 
-    // ✅ type は props から必ず 1〜4 で来るので「不正」分岐を消す
-    const res = makeDemoAnalysis(type as CatId);
+  // ✅ type が不正ならトップへ（ただし今回の toCatId でほぼ起きない）
+  useEffect(() => {
+    if (!cat) router.replace("/");
+  }, [cat, router]);
+
+  const [toast, setToast] = useState<string | null>(null);
+
+  const runDemo = () => {
+    if (!cat) return;
+
+    const res = makeDemoAnalysis(cat);
 
     addHistory({
       type: res.type,
       score: res.score,
-      comment: res.summary,       // A
-      drill: res.nextDrill,       // A
-      breakdown: res.breakdown,   // B
-      src: movie,
+      comment: res.summary,
+      drill: res.nextDrill,
+      breakdown: res.breakdown,
+      src: movie === "live-camera" ? "live-camera" : movie,
     });
 
-    setResult(res);
-    setLoading(false);
-
-    // ✅ “結果へ遷移しない” 問題を消す：実行後は履歴へ
     router.push("/history");
   };
 
@@ -56,36 +94,26 @@ export default function AnalyzeClient({ type }: Props) {
     <main>
       <div className="page">
         <div className="title">解析</div>
-        <div className="desc">カテゴリ：{typeLabel(type)}</div>
+        <div className="desc">カテゴリ：{categoryText}</div>
 
         <div style={{ marginTop: 12 }}>
           <div style={{ marginBottom: 8, opacity: 0.9, fontWeight: 800 }}>動画</div>
 
-          {/* ✅ live-camera は video を出さない（今はデモ表示） */}
-          {movie === "live-camera" ? (
-            <div
-              style={{
-                width: "100%",
-                aspectRatio: "16/9",
-                borderRadius: 16,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                display: "grid",
-                placeItems: "center",
-                color: "rgba(255,255,255,0.75)",
-                fontWeight: 900,
-              }}
-            >
-              カメラ映像（デモ）※保存はまだ
-            </div>
-          ) : (
-            <video
-              src={movie}
-              controls
-              playsInline
-              style={{ width: "100%", borderRadius: 16 }}
-            />
-          )}
+          <div
+            style={{
+              width: "100%",
+              aspectRatio: "16/9",
+              borderRadius: 16,
+              background: "rgba(255,255,255,0.06)",
+              border: "1px solid rgba(255,255,255,0.12)",
+              display: "grid",
+              placeItems: "center",
+              color: "rgba(255,255,255,0.75)",
+              fontWeight: 900,
+            }}
+          >
+            カメラは起動しています（デモ解析用）
+          </div>
         </div>
 
         <button
@@ -93,21 +121,10 @@ export default function AnalyzeClient({ type }: Props) {
           className="cta"
           onClick={runDemo}
           style={{ marginTop: 14 }}
-          disabled={loading}
+          disabled={!cat}
         >
-          {loading ? "解析中..." : "解析を実行（デモ）"}
+          解析を実行（デモ）
         </button>
-
-        {/* デバッグ表示（消したければ消してOK） */}
-        <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
-          type={type} / movie={movie}
-        </div>
-
-        {result && (
-          <div style={{ marginTop: 14, opacity: 0.9, fontSize: 12 }}>
-            （resultを保存しました。履歴へ移動します）
-          </div>
-        )}
 
         <button
           type="button"
@@ -125,6 +142,8 @@ export default function AnalyzeClient({ type }: Props) {
         >
           トップへ戻る
         </button>
+
+        {toast && <div style={{ marginTop: 10, opacity: 0.85, fontSize: 12 }}>{toast}</div>}
       </div>
     </main>
   );
