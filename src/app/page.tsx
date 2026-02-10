@@ -1,92 +1,51 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-type Cat = {
-  id: 1 | 2 | 3 | 4;
-  label: string;
-  colorClass: string;
-  title: string;
-  sub: string;
-};
+type CatNum = 1 | 2 | 3 | 4;
 
-export default function HomePage() {
+function toCatNum(v: string | null): CatNum | null {
+  if (!v) return null;
+
+  // 数字（1-4）
+  const n = Number(v);
+  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
+
+  // ローマ（I/II/III/IV）
+  const s = v.toUpperCase();
+  if (s === "I") return 1;
+  if (s === "II") return 2;
+  if (s === "III") return 3;
+  if (s === "IV") return 4;
+
+  return null;
+}
+
+export default function AnalyzeEntry() {
   const router = useRouter();
-  const [selected, setSelected] = useState<1 | 2 | 3 | 4 | null>(null);
+  const sp = useSearchParams();
 
-  const cats = useMemo<Cat[]>(
-    () => [
-      { id: 1, label: "Ⅰ", colorClass: "red", title: "前伸傾向", sub: "ポイントが前に出やすい" },
-      { id: 2, label: "Ⅱ", colorClass: "green", title: "前沈傾向", sub: "沈み込みで詰まりやすい" },
-      { id: 3, label: "Ⅲ", colorClass: "blue", title: "後伸傾向", sub: "体重移動が弱く伸び上がる" },
-      { id: 4, label: "Ⅳ", colorClass: "yellow", title: "後沈傾向", sub: "しまい込みで弾道が乱れやすい" },
-    ],
-    []
-  );
+  useEffect(() => {
+    // ✅ type でも category でも拾う（どっちで来てもOK）
+    const typeRaw = sp.get("type") ?? sp.get("category");
+    const type = toCatNum(typeRaw);
 
-  const goUpload = () => {
-    if (!selected) return;
-    router.push(`/upload?category=${selected}`);
-  };
+    const movie = sp.get("movie") ?? "/uploads/demo.mov";
+    const q = `?movie=${encodeURIComponent(movie)}`;
+
+    if (type) {
+      router.replace(`/analyze/${type}${q}`);
+    } else {
+      router.replace(`/`);
+    }
+  }, [router, sp]);
 
   return (
     <main>
       <div className="page">
-        <div className="title">BATTING OS</div>
-        <div className="desc">自分の打撃タイプを選んで、動画をアップして解析します。</div>
-
-        <div className="matrix">
-          {cats.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`cell ${c.colorClass}`}
-              onClick={() => setSelected(c.id)}
-              aria-label={`カテゴリ${c.id}`}
-              style={{
-                outline: selected === c.id ? "3px solid rgba(255,255,255,0.9)" : "none",
-                boxShadow: selected === c.id ? "0 0 0 6px rgba(255,255,255,0.15)" : "none",
-              }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="list">
-          {cats.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`row ${selected === c.id ? "active" : ""}`}
-              onClick={() => setSelected(c.id)}
-              style={{ textAlign: "left", cursor: "pointer" }}
-            >
-              <div className="dot" style={{ background: "rgba(255,255,255,0.75)" }} />
-              <div className="text">
-                <div className="rowTitle">
-                  {c.label}：{c.title}
-                </div>
-                <div className="rowSub">{c.sub}</div>
-              </div>
-              <div className="arrow">›</div>
-            </button>
-          ))}
-        </div>
-
-        <button
-          type="button"
-          className="cta"
-          onClick={goUpload}
-          disabled={!selected}
-          style={{
-            opacity: selected ? 1 : 0.5,
-            cursor: selected ? "pointer" : "not-allowed",
-          }}
-        >
-          動画を解析する
-        </button>
+        <div className="title">解析</div>
+        <div className="desc">遷移中...</div>
       </div>
     </main>
   );
