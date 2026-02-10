@@ -1,53 +1,69 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
-function catLabelFromCategory(category: string | null) {
-  switch (category) {
-    case "1":
-      return "Ⅰ 前伸傾向";
-    case "2":
-      return "Ⅱ 前沈傾向";
-    case "3":
-      return "Ⅲ 後伸傾向";
-    case "4":
-      return "Ⅳ 後沈傾向";
-    default:
-      return "未選択";
-  }
-}
+/**
+ * UploadClient は /upload?page.tsx から
+ *  - category（"1"〜"4"） ※ string想定
+ *  - title（表示用文字列）
+ * を props でもらう前提
+ *
+ * もし props 名が違うなら、ここだけ合わせてOK：
+ * export default function UploadClient({ category, title }: Props)
+ */
+type Props = {
+  category: string | null;
+  title: string;
+};
 
-export default function UploadClient() {
+export default function UploadClient({ category, title }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const category = searchParams.get("category"); // "1"〜"4" or null
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const [cameraOn, setCameraOn] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [movieUrl, setMovieUrl] = useState<string>(""); // 解析に渡す動画URL（デモは空でOK）
+  const [starting, setStarting] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
 
-  const title = useMemo(() => catLabelFromCategory(category), [category]);
+  // ✅ category を “必ず数値(1-4)” に正規化して使う（これが最重要）
+  const type = useMemo(() => {
+    const n = Number(category);
+    if ([1, 2, 3, 4].includes(n)) return n as 1 | 2 | 3 | 4;
+    return null;
+  }, [category]);
 
-  // 🎥 カメラ起動
   const startCamera = async () => {
-    setError(null);
+    if (starting) return;
+    setStarting(true);
+
     try {
+      // すでに起動してたら一旦止める
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" }, // スマホは背面カメラ
+        video: {
+          facingMode: "environment",
+        },
         audio: false,
       });
 
       streamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
-      setCameraOn(true);
+
+      setCameraReady(true);
     } catch (e) {
       console.error(e);
-      setError("カメラを起動できませんでした（許可が必要です）");
+      alert("カメラを起動できませんでした（ブラウザ権限を確認）");
+      setCameraReady(false);
+    } finally {
+      setStarting(false);
     }
   };
 
@@ -55,16 +71,20 @@ export default function UploadClient() {
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     };
   }, []);
 
- const goAnalyze = () => {
-  if (!category) {
-    alert("カテゴリが取れてない！");
-    return;
-  }
- router.push(`/analyze/${category}?movie=${encodeURIComponent(movieUrl)}`);
-};
+  // ✅ 解析へ遷移（404対策：/analyze/1 の形に強制）
+  const goAnalyze = () => {
+    if (!type) {
+      alert("カテゴリが不正です（1〜4）: " + String(category));
+      return;
+    }
+
+    const movie = movieUrl || "/uploads/demo.mov";
+    router.push(`/analyze/${type}?movie=${encodeURIComponent(movie)}`);
+  };
 
   return (
     <main>
@@ -79,62 +99,50 @@ export default function UploadClient() {
             borderRadius: 16,
             overflow: "hidden",
             background: "#000",
-            border: "1px solid rgba(255,255,255,0.15)",
+            border: "1px solid rgba(255,255,255,0.12)",
           }}
         >
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
+          <div
             style={{
-              width: "100%",
-              height: 260,
-              objectFit: "cover",
-              display: cameraOn ? "block" : "none",
+              aspectRatio: "16 / 9",
+              display: "grid",
+              placeItems: "center",
+              position: "relative",
             }}
-          />
-
-          {!cameraOn && (
-            <div
+          >
+            <video
+              ref={videoRef}
+              playsInline
+              muted
               style={{
-                height: 260,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "#aaa",
-                fontWeight: 700,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: cameraReady ? "block" : "none",
               }}
-            >
-              カメラはまだ起動していません
-            </div>
-          )}
+            />
+            {!cameraReady && (
+              <div style={{ opacity: 0.75, padding: 16 }}>
+                カメラは起動していません（デモ解析用）
+              </div>
+            )}
+          </div>
         </div>
 
-        {error && (
-          <div style={{ marginTop: 12, color: "#ff8a8a", fontWeight: 700 }}>
-            {error}
-          </div>
-        )}
-
-        {/* 操作ボタン */}
-        <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
-          <button type="button" className="cta" onClick={startCamera}>
-            カメラを起動
-          </button>
-
+        {/* ボタン群 */}
+        <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
           <button
             type="button"
             className="cta"
-            onClick={goAnalyze}
-            // カメラONじゃないと押せない（今まで通り）
-            disabled={!cameraOn}
-            style={{
-              opacity: cameraOn ? 1 : 0.5,
-              cursor: cameraOn ? "pointer" : "not-allowed",
-            }}
+            onClick={startCamera}
+            disabled={starting}
+            style={{ opacity: starting ? 0.7 : 1 }}
           >
-            この映像を解析へ →
+            {starting ? "カメラ起動中..." : "カメラを起動"}
+          </button>
+
+          <button type="button" className="cta" onClick={goAnalyze}>
+            解析を実行（デモ）
           </button>
 
           <button
@@ -149,7 +157,7 @@ export default function UploadClient() {
               fontWeight: 700,
             }}
           >
-            ← 戻る
+            トップへ戻る
           </button>
         </div>
       </div>
