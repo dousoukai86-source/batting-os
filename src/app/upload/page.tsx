@@ -4,7 +4,7 @@ import UploadClient from "./UploadClient";
 
 export default function Page() {
   return (
-    <Suspense fallback={<div style={{ padding: 24 }}>読み込み中...</div>}>
+    <Suspense fallback={<div className="page">読み込み中...</div>}>
       <UploadClient />
     </Suspense>
   );

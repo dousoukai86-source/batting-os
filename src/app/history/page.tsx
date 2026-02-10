@@ -1,134 +1,86 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getHistory, clearHistory, type HistoryItem } from "@/lib/history";
-
-function typeLabel(type: 1 | 2 | 3 | 4) {
-  return type === 1 ? "Ⅰ 前伸" : type === 2 ? "Ⅱ 前沈" : type === 3 ? "Ⅲ 後伸" : "Ⅳ 後沈";
-}
+import { getHistory, clearHistory } from "@/lib/history";
 
 export default function HistoryPage() {
   const router = useRouter();
-  const [items, setItems] = useState<HistoryItem[]>([]);
 
-  useEffect(() => {
-    setItems(getHistory());
+  const items = useMemo(() => {
+    // lib/history.ts 側に getHistory がある想定
+    // （なければ、この後すぐ合わせる）
+    return getHistory();
   }, []);
-
-  const hasItems = useMemo(() => items.length > 0, [items]);
 
   return (
     <main>
       <div className="page">
         <div className="title">履歴</div>
-        <div className="desc">A（文章）とB（数値）を両方保存しています。</div>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-          <button
-            type="button"
-            className="cta"
-            onClick={() => router.push("/")}
-            style={{ flex: 1 }}
-          >
-            トップへ
-          </button>
+        {items.length === 0 ? (
+          <div style={{ opacity: 0.8, marginTop: 10 }}>まだ履歴がありません</div>
+        ) : (
+          <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+            {items.map((it, idx) => (
+              <div
+                key={idx}
+                style={{
+                  padding: 14,
+                  borderRadius: 16,
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(255,255,255,0.06)",
+                }}
+              >
+                <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                  {it.typeLabel ?? `type: ${it.type}`}
+                  <span style={{ opacity: 0.8, marginLeft: 10 }}>score: {it.score}</span>
+                </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              clearHistory();
-              setItems([]);
-            }}
-            style={{
-              flex: 1,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.25)",
-              color: "#fff",
-              padding: "14px",
-              borderRadius: 16,
-              fontWeight: 800,
-            }}
-          >
-            履歴を消す
-          </button>
-        </div>
+                {it.comment && <div style={{ marginTop: 6, opacity: 0.95 }}>{it.comment}</div>}
+                {it.drill && <div style={{ marginTop: 8, opacity: 0.9 }}>次：{it.drill}</div>}
 
-        {!hasItems && (
-          <div style={{ opacity: 0.8 }}>まだ履歴がありません。</div>
+                {it.breakdown && (
+                  <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85, lineHeight: 1.6 }}>
+                    <div>再現性：{it.breakdown.repeat}</div>
+                    <div>タイミング：{it.breakdown.timing}</div>
+                    <div>軸：{it.breakdown.axis}</div>
+                    <div>回転：{it.breakdown.rotate}</div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         )}
 
-        <div style={{ display: "grid", gap: 12 }}>
-          {items.map((it) => (
-            <div
-              key={it.id}
-              style={{
-                padding: 14,
-                borderRadius: 14,
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.1)",
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-                <div style={{ fontWeight: 900 }}>
-                  {typeLabel(it.type)} / スコア {it.score ?? "-"}
-                </div>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  {new Date(it.createdAt).toLocaleString()}
-                </div>
-              </div>
+        <button
+          type="button"
+          className="cta"
+          onClick={() => router.push("/")}
+          style={{ marginTop: 14 }}
+        >
+          トップへ戻る
+        </button>
 
-              {/* A */}
-              {it.comment && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontWeight: 900, marginBottom: 4 }}>コメント（A）</div>
-                  <div style={{ opacity: 0.9, whiteSpace: "pre-wrap" }}>{it.comment}</div>
-                </div>
-              )}
-
-              {it.drill && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontWeight: 900, marginBottom: 4 }}>次の宿題（A）</div>
-                  <div style={{ opacity: 0.9, whiteSpace: "pre-wrap" }}>{it.drill}</div>
-                </div>
-              )}
-
-              {/* B */}
-              {it.breakdown && (
-                <div style={{ marginTop: 10 }}>
-                  <div style={{ fontWeight: 900, marginBottom: 6 }}>数値（B）</div>
-                  <div style={{ fontSize: 12, opacity: 0.85, lineHeight: 1.8 }}>
-                    姿勢 {it.breakdown.posture} / 体重移動 {it.breakdown.weight} / インパクト {it.breakdown.impact}
-                    <br />
-                    再現性 {it.breakdown.repeat} / タイミング {it.breakdown.timing}
-                  </div>
-                </div>
-              )}
-
-             {/* 再解析へ（同じタイプで飛べる） */}
-<div style={{ marginTop: 12 }}>
- <button
-  type="button"
-  onClick={() => {
-    const movie = it.src || "/uploads/demo.mov";
-    router.push(`/analyze/${it.type}?movie=${encodeURIComponent(movie)}`);
-  }}
-  style={{
-    width: "100%",
-    background: "transparent",
-    border: "1px solid rgba(255,255,255,0.25)",
-    color: "#fff",
-    padding: "10px 12px",
-    borderRadius: 12,
-    fontWeight: 800,
-  }}
->
-  この履歴のタイプで解析ページへ
-</button>
-</div>
-            </div>
-          ))}
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            clearHistory();
+            router.refresh();
+          }}
+          style={{
+            marginTop: 12,
+            width: "100%",
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.25)",
+            color: "#fff",
+            padding: "12px",
+            borderRadius: 16,
+            fontWeight: 800,
+          }}
+        >
+          履歴をクリア
+        </button>
       </div>
     </main>
   );

@@ -1,109 +1,104 @@
 "use client";
 
+// src/app/upload/UploadClient.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
-type CatNum = 1 | 2 | 3 | 4;
+type CatId = 1 | 2 | 3 | 4;
 
-// "IV" / "Ⅳ" / "4" / "Ⅰ" など何が来ても 1〜4 に正規化
-function toType(raw: string | null | undefined): CatNum | null {
-  if (!raw) return null;
-  const s = String(raw).trim();
+const labelOf = (t: CatId) =>
+  t === 1 ? "Ⅰ 前伸傾向" : t === 2 ? "Ⅱ 前沈傾向" : t === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 
-  // まず数字
-  if (s === "1" || s === "2" || s === "3" || s === "4") return Number(s) as CatNum;
+/** 何が来ても 1〜4 に寄せる（"1" / "IV" / "Ⅳ" など） */
+const toCatId = (v: string | null | undefined): CatId | null => {
+  if (!v) return null;
+  const s = v.trim().toUpperCase();
+
+  // 数字
+  if (s === "1") return 1;
+  if (s === "2") return 2;
+  if (s === "3") return 3;
+  if (s === "4") return 4;
 
   // ローマ数字（ASCII）
-  const upper = s.toUpperCase();
-  if (upper === "I") return 1;
-  if (upper === "II") return 2;
-  if (upper === "III") return 3;
-  if (upper === "IV") return 4;
+  if (s === "I") return 1;
+  if (s === "II") return 2;
+  if (s === "III") return 3;
+  if (s === "IV") return 4;
 
-  // ローマ数字（全角っぽい記号）
-  if (s.includes("Ⅰ")) return 1;
-  if (s.includes("Ⅱ")) return 2;
-  if (s.includes("Ⅲ")) return 3;
-  if (s.includes("Ⅳ")) return 4;
-
-  // 表示用の "I/II/III/IV 前伸〜" みたいなのにも対応
-  if (upper.includes("IV")) return 4;
-  if (upper.includes("III")) return 3;
-  if (upper.includes("II")) return 2;
-  if (upper.includes("I")) return 1;
+  // ローマ数字（全角っぽい）
+  if (s === "Ⅰ") return 1;
+  if (s === "Ⅱ") return 2;
+  if (s === "Ⅲ") return 3;
+  if (s === "Ⅳ") return 4;
 
   return null;
-}
-
-function labelOf(type: CatNum) {
-  return type === 1
-    ? "I 前伸傾向"
-    : type === 2
-    ? "II 前沈傾向"
-    : type === 3
-    ? "III 後伸傾向"
-    : "IV 後沈傾向";
-}
+};
 
 export default function UploadClient() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // /upload?category=... から受け取る（数字でもIVでもOK）
-  const type = useMemo<CatNum | null>(() => toType(sp.get("category")), [sp]);
+  // ✅ ここが超重要：category を必ず 1..4 に正規化
+  const type = useMemo<CatId | null>(() => toCatId(sp.get("category")), [sp]);
 
+  // camera
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const [camState, setCamState] = useState<"idle" | "on" | "err">("idle");
+  const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  const [movieUrl, setMovieUrl] = useState<string>("");
-  const [cameraReady, setCameraReady] = useState(false);
-
-  // ✅ iOS Safari対策：ユーザー操作（ボタンタップ）で getUserMedia を呼ぶ
-  const startCamera = async () => {
+  const stopCamera = () => {
     try {
-      // 既に起動してたら何もしない
-      if (streamRef.current) return;
+      streamRef.current?.getTracks()?.forEach((t) => t.stop());
+    } catch {}
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCamState("idle");
+  };
 
+  const startCamera = async () => {
+    setErrMsg(null);
+
+    try {
+      // iPhoneは user gesture 必須（このボタンがそれ）
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
 
       streamRef.current = stream;
-
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // iOS対策
-        videoRef.current.playsInline = true;
-        await videoRef.current.play();
+        await videoRef.current.play().catch(() => {});
       }
-
-      setCameraReady(true);
-    } catch (e) {
-      console.error(e);
-      alert("カメラを起動できません。Safariのカメラ許可を確認してください。");
+      setCamState("on");
+    } catch (e: any) {
+      setCamState("err");
+      setErrMsg(e?.message ?? "カメラを起動できませんでした");
     }
   };
 
-  // ✅ ページ離脱でカメラ停止
+  // ページ離脱でカメラ停止
   useEffect(() => {
-    return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    };
+    return () => stopCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ✅ 解析へ進む（デモ）— ここが “トップ戻り” を止める本体
   const goAnalyze = () => {
     if (!type) {
-      alert("カテゴリが取れていません。トップからカテゴリ選択し直してね。");
+      alert("カテゴリが取得できていません。トップから選び直してください。");
+      router.replace("/");
       return;
     }
 
-    // デモ用：動画URLが無ければ固定デモへ
-    const movie = movieUrl || "/uploads/demo.mov";
-
-    // ✅ ここが最重要：/analyze/[type] は 1〜4 の数字で行く
-   router.push(`/analyze/${category}?movie=live-camera`);
+    // movie はとりあえず live-camera として渡す（後で本物の動画に差し替えOK）
+    router.push(`/analyze/${type}?movie=live-camera`);
   };
 
   return (
@@ -112,54 +107,69 @@ export default function UploadClient() {
         <div className="title">アップロード</div>
         <div className="desc">カテゴリ：{type ? labelOf(type) : "未選択"}</div>
 
-        {/* カメラ枠 */}
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>カメラ</div>
-
-          <button
-            type="button"
-            className="cta"
-            onClick={startCamera}
-            style={{ width: "100%", marginBottom: 12 }}
-          >
-            カメラを起動（タップ必須）
-          </button>
+          <div style={{ fontWeight: 900, marginBottom: 8, opacity: 0.9 }}>カメラ</div>
 
           <div
             style={{
-              borderRadius: 16,
-              overflow: "hidden",
+              borderRadius: 18,
               background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.1)",
-              height: 240,
-              display: "grid",
-              placeItems: "center",
+              border: "1px solid rgba(255,255,255,0.12)",
+              padding: 16,
             }}
           >
-            <video
-              ref={videoRef}
-              muted
-              playsInline
+            <button type="button" className="cta" onClick={startCamera}>
+              カメラを起動（タップ必須）
+            </button>
+
+            <div style={{ height: 12 }} />
+
+            <div
               style={{
                 width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: cameraReady ? "block" : "none",
+                aspectRatio: "16/9",
+                borderRadius: 16,
+                overflow: "hidden",
+                background: "rgba(0,0,0,0.25)",
+                border: "1px solid rgba(255,255,255,0.12)",
               }}
-            />
-            {!cameraReady && (
-              <div style={{ opacity: 0.7 }}>上のボタンでカメラを起動してください</div>
+            >
+              <video
+                ref={videoRef}
+                playsInline
+                muted
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            </div>
+
+            {camState === "on" && (
+              <button
+                type="button"
+                onClick={stopCamera}
+                style={{
+                  marginTop: 12,
+                  width: "100%",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  color: "#fff",
+                  padding: "12px",
+                  borderRadius: 16,
+                  fontWeight: 800,
+                }}
+              >
+                カメラ停止
+              </button>
+            )}
+
+            {errMsg && (
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>
+                ⚠️ {errMsg}
+              </div>
             )}
           </div>
         </div>
 
-        {/* 解析へ */}
-        <button
-          type="button"
-          className="cta"
-          onClick={goAnalyze}
-          style={{ width: "100%", marginTop: 18 }}
-        >
+        <button type="button" className="cta" onClick={goAnalyze} style={{ marginTop: 14 }}>
           解析へ進む（デモ）
         </button>
 
@@ -167,12 +177,12 @@ export default function UploadClient() {
           type="button"
           onClick={() => router.push("/")}
           style={{
+            marginTop: 12,
             width: "100%",
-            marginTop: 10,
             background: "transparent",
             border: "1px solid rgba(255,255,255,0.25)",
             color: "#fff",
-            padding: "14px",
+            padding: "12px",
             borderRadius: 16,
             fontWeight: 800,
           }}
