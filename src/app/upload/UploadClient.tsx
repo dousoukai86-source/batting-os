@@ -63,7 +63,7 @@ export default function UploadClient() {
     alert("カテゴリが取れてない！");
     return;
   }
-  router.push(`/analyze/${category}?movie=live-camera`);
+ router.push(`/analyze/${category}?movie=${encodeURIComponent(movieUrl)}`);
 };
 
   return (
