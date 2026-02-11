@@ -5,34 +5,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { makeDemoAnalysis, type CatId } from "@/lib/analysisText";
 import { addHistory } from "@/lib/history";
+import { loadVideoBlob } from "@/lib/videoStore";
 
 type Props = {
   type: string; // route param: /analyze/[type]
 };
 
-/** ✅ UploadClient と同じ：何が来ても 1〜4 に寄せる（"1" / "IV" / "Ⅳ" など） */
 function toCatId(v: string | null | undefined): CatId | null {
-  if (!v) return null;
-  const s = v.trim().toUpperCase();
-
-  // 数字
-  if (s === "1") return 1 as CatId;
-  if (s === "2") return 2 as CatId;
-  if (s === "3") return 3 as CatId;
-  if (s === "4") return 4 as CatId;
-
-  // ローマ数字（ASCII）
-  if (s === "I") return 1 as CatId;
-  if (s === "II") return 2 as CatId;
-  if (s === "III") return 3 as CatId;
-  if (s === "IV") return 4 as CatId;
-
-  // ローマ数字（全角）
-  if (s === "Ⅰ") return 1 as CatId;
-  if (s === "Ⅱ") return 2 as CatId;
-  if (s === "Ⅲ") return 3 as CatId;
-  if (s === "Ⅳ") return 4 as CatId;
-
+  const n = Number(v);
+  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
   return null;
 }
 
@@ -50,34 +31,61 @@ export default function AnalyzeClient({ type }: Props) {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // ✅ route param の type を「1〜4」に正規化
   const cat = useMemo(() => toCatId(type), [type]);
 
-  // ✅ movie は query で受け取る（なくてもOK）
-  const movie = useMemo(() => sp.get("movie") ?? "live-camera", [sp]);
+  const movieParam = useMemo(() => sp.get("movie") ?? "live-camera", [sp]);
 
-  // video 表示用（今は使わない）
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoNote, setVideoNote] = useState<string>("");
 
-  const categoryText = useMemo(() => {
-    if (!cat) return "未選択";
-    return typeLabel(cat);
-  }, [cat]);
-
-  // ✅ ここが超重要：type が空のとき(一瞬)に誤爆しないようにガードする
+  // typeが不正ならトップへ
   useEffect(() => {
-    // type が空/未定義っぽい瞬間は何もしない
-    if (!type) return;
+    if (!cat) router.replace("/matrix");
+  }, [cat, router]);
 
-    // type が確定してるのに cat が作れない → 不正URLなのでトップへ
-    if (!cat) router.replace("/");
-  }, [type, cat, router]);
+  // movie を解決（idb:xxx の場合は IndexedDB から復元）
+  useEffect(() => {
+    let revoke: string | null = null;
 
-  const [toast, setToast] = useState<string | null>(null);
+    const run = async () => {
+      setVideoSrc(null);
+      setVideoNote("");
+
+      if (movieParam.startsWith("idb:")) {
+        const id = movieParam.slice("idb:".length);
+        const blob = await loadVideoBlob(id);
+        if (!blob) {
+          setVideoNote("⚠️ 保存された動画が見つかりませんでした（端末を変えた/保存が消えた可能性）");
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        revoke = url;
+        setVideoSrc(url);
+        setVideoNote(`保存動画（${id}）`);
+        return;
+      }
+
+      // live-camera や URL の場合
+      if (movieParam === "live-camera") {
+        setVideoNote("ライブカメラ（デモ解析）");
+        return;
+      }
+
+      setVideoSrc(movieParam);
+      setVideoNote("指定URL動画");
+    };
+
+    run();
+
+    return () => {
+      if (revoke) URL.revokeObjectURL(revoke);
+    };
+  }, [movieParam]);
+
+  const categoryText = useMemo(() => (cat ? typeLabel(cat) : "未選択"), [cat]);
 
   const runDemo = () => {
     if (!cat) return;
-
     const res = makeDemoAnalysis(cat);
 
     addHistory({
@@ -86,7 +94,7 @@ export default function AnalyzeClient({ type }: Props) {
       comment: res.summary,
       drill: res.nextDrill,
       breakdown: res.breakdown,
-      src: movie === "live-camera" ? "live-camera" : movie,
+      src: movieParam, // ✅ idb:xxxx のまま保存（再解析で復元できる）
     });
 
     router.push("/history");
@@ -101,40 +109,47 @@ export default function AnalyzeClient({ type }: Props) {
         <div style={{ marginTop: 12 }}>
           <div style={{ marginBottom: 8, opacity: 0.9, fontWeight: 800 }}>動画</div>
 
-          <div
-            style={{
-              width: "100%",
-              aspectRatio: "16/9",
-              borderRadius: 16,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.12)",
-              display: "grid",
-              placeItems: "center",
-              color: "rgba(255,255,255,0.75)",
-              fontWeight: 900,
-            }}
-          >
-            カメラは起動しています（デモ解析用）
-          </div>
+          {/* 保存動画があるなら再生 */}
+          {videoSrc ? (
+            <video
+              controls
+              playsInline
+              src={videoSrc}
+              style={{
+                width: "100%",
+                borderRadius: 16,
+                background: "rgba(0,0,0,0.25)",
+                border: "1px solid rgba(255,255,255,0.12)",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: "100%",
+                aspectRatio: "16/9",
+                borderRadius: 16,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                display: "grid",
+                placeItems: "center",
+                color: "rgba(255,255,255,0.75)",
+                fontWeight: 900,
+              }}
+            >
+              {movieParam === "live-camera" ? "カメラは起動しています（デモ解析用）" : "動画を読み込み中..."}
+            </div>
+          )}
 
-          {/* 後で繋ぐなら
-          <video ref={videoRef} controls playsInline style={{ width: "100%", borderRadius: 16 }} />
-          */}
+          {videoNote && <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>{videoNote}</div>}
         </div>
 
-        <button
-          type="button"
-          className="cta"
-          onClick={runDemo}
-          style={{ marginTop: 14 }}
-          disabled={!cat}
-        >
+        <button type="button" className="cta" onClick={runDemo} style={{ marginTop: 14 }} disabled={!cat}>
           解析を実行（デモ）
         </button>
 
         <button
           type="button"
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/matrix")}
           style={{
             marginTop: 12,
             width: "100%",
@@ -146,10 +161,8 @@ export default function AnalyzeClient({ type }: Props) {
             fontWeight: 800,
           }}
         >
-          トップへ戻る
+          マトリクスへ戻る
         </button>
-
-        {toast && <div style={{ marginTop: 10, opacity: 0.85, fontSize: 12 }}>{toast}</div>}
       </div>
     </main>
   );

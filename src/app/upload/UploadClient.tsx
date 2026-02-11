@@ -1,22 +1,47 @@
 "use client";
 
+// src/app/upload/UploadClient.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { saveVideoBlob } from "@/lib/videoStore";
 
 type CatId = 1 | 2 | 3 | 4;
 
 const labelOf = (t: CatId) =>
   t === 1 ? "Ⅰ 前伸傾向" : t === 2 ? "Ⅱ 前沈傾向" : t === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 
+/** 何が来ても 1〜4 に寄せる（"1" / "IV" / "Ⅳ" など） */
 const toCatId = (v: string | null | undefined): CatId | null => {
   if (!v) return null;
   const s = v.trim().toUpperCase();
-  if (s === "1" || s === "I" || s === "Ⅰ") return 1;
-  if (s === "2" || s === "II" || s === "Ⅱ") return 2;
-  if (s === "3" || s === "III" || s === "Ⅲ") return 3;
-  if (s === "4" || s === "IV" || s === "Ⅳ") return 4;
+
+  if (s === "1") return 1;
+  if (s === "2") return 2;
+  if (s === "3") return 3;
+  if (s === "4") return 4;
+
+  if (s === "I") return 1;
+  if (s === "II") return 2;
+  if (s === "III") return 3;
+  if (s === "IV") return 4;
+
+  if (s === "Ⅰ") return 1;
+  if (s === "Ⅱ") return 2;
+  if (s === "Ⅲ") return 3;
+  if (s === "Ⅳ") return 4;
+
   return null;
 };
+
+function isSecureContextForCamera() {
+  if (typeof window === "undefined") return false;
+  // https か localhost 系のみ基本OK
+  const isLocal =
+    location.hostname === "localhost" ||
+    location.hostname === "127.0.0.1" ||
+    location.hostname.endsWith(".local");
+  return window.isSecureContext || isLocal;
+}
 
 export default function UploadClient() {
   const router = useRouter();
@@ -27,24 +52,32 @@ export default function UploadClient() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
   const [camState, setCamState] = useState<"idle" | "on" | "err">("idle");
+  const [recState, setRecState] = useState<"idle" | "rec" | "saving">("idle");
+
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
-  const isSecure = useMemo(() => {
-    if (typeof window === "undefined") return false;
-    return window.location.protocol === "https:" || window.location.hostname === "localhost";
-  }, []);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [savedId, setSavedId] = useState<string | null>(null);
 
-  const hasMediaDevices = useMemo(() => {
-    if (typeof navigator === "undefined") return false;
-    return !!navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === "function";
-  }, []);
+  const cleanupPreview = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPreviewUrl(null);
+  };
 
   const stopCamera = () => {
+    try {
+      recorderRef.current?.stop?.();
+    } catch {}
+    recorderRef.current = null;
+
     try {
       streamRef.current?.getTracks()?.forEach((t) => t.stop());
     } catch {}
     streamRef.current = null;
+
     if (videoRef.current) videoRef.current.srcObject = null;
     setCamState("idle");
   };
@@ -52,54 +85,126 @@ export default function UploadClient() {
   const startCamera = async () => {
     setErrMsg(null);
 
-    // ここで “原因をはっきり出す”
-    if (!hasMediaDevices) {
+    if (!isSecureContextForCamera()) {
       setCamState("err");
       setErrMsg(
-        "このブラウザ/接続ではカメラAPIが使えません。対策：① https のURLで開く（Vercel / ngrok / Cloudflare Tunnel）② LINE等の内蔵ブラウザではなくSafariで開く"
-      );
-      return;
-    }
-    if (!isSecure) {
-      setCamState("err");
-      setErrMsg(
-        "現在 http で開いているためカメラがブロックされています。https のURLで開いてください（Vercel/ngrok推奨）。"
+        `このURLではカメラAPIが使えません。httpsで開いてください。\n現在のURL: ${typeof window !== "undefined" ? location.href : ""}`
       );
       return;
     }
 
     try {
+      // 外カメラ優先（iPhone）
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: "user",
+          facingMode: "environment",
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
-        audio: false,
+        audio: true, // 動画として保存したいなら true 推奨（音なしなら false に）
       });
 
       streamRef.current = stream;
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = true; // 録画中のハウリング回避
         await videoRef.current.play().catch(() => {});
       }
+
       setCamState("on");
     } catch (e: any) {
       setCamState("err");
-      setErrMsg(e?.message ?? "カメラを起動できませんでした（権限/設定を確認）");
+      setErrMsg(e?.message ?? "カメラを起動できませんでした");
     }
   };
 
-  useEffect(() => () => stopCamera(), []);
+  const startRec = () => {
+    setErrMsg(null);
 
+    if (!streamRef.current) {
+      setErrMsg("先にカメラを起動してください。");
+      return;
+    }
+
+    if (typeof MediaRecorder === "undefined") {
+      setErrMsg("このブラウザは録画(MediaRecorder)に未対応です。iPhoneはSafariで開いてください。");
+      return;
+    }
+
+    try {
+      cleanupPreview();
+      setSavedId(null);
+
+      chunksRef.current = [];
+
+      // iOS Safari は mimeType 指定でコケる事があるので、まずは指定なしが安全
+      const mr = new MediaRecorder(streamRef.current);
+      recorderRef.current = mr;
+
+      mr.ondataavailable = (ev) => {
+        if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
+      };
+
+      mr.onstop = async () => {
+        try {
+          setRecState("saving");
+          const blob = new Blob(chunksRef.current, { type: "video/webm" }); // 実際のtypeはブラウザ依存
+          const url = URL.createObjectURL(blob);
+          setPreviewUrl(url);
+
+          // IndexedDB に保存
+          const id = await saveVideoBlob(blob);
+          setSavedId(id);
+
+          setRecState("idle");
+        } catch (e: any) {
+          setRecState("idle");
+          setErrMsg(e?.message ?? "保存に失敗しました");
+        }
+      };
+
+      mr.start();
+      setRecState("rec");
+    } catch (e: any) {
+      setErrMsg(e?.message ?? "録画を開始できませんでした");
+    }
+  };
+
+  const stopRec = () => {
+    try {
+      recorderRef.current?.stop();
+    } catch {}
+    recorderRef.current = null;
+    setRecState("idle");
+  };
+
+  // 解析へ進む（保存済みIDを渡す）
   const goAnalyze = () => {
     if (!type) {
       alert("カテゴリが取得できていません。マトリクスから選び直してください。");
       router.replace("/matrix");
       return;
     }
-    router.push(`/analyze/${type}?movie=live-camera`);
+    if (!savedId) {
+      alert("まだ動画が保存できていません。録画→停止してから進んでください。");
+      return;
+    }
+
+    router.push(`/analyze/${type}?movie=${encodeURIComponent(`idb:${savedId}`)}`);
   };
+
+  // ページ離脱で停止 + preview解放
+  useEffect(() => {
+    return () => {
+      try {
+        recorderRef.current?.stop?.();
+      } catch {}
+      stopCamera();
+      cleanupPreview();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main>
@@ -118,8 +223,8 @@ export default function UploadClient() {
               padding: 16,
             }}
           >
-            <button type="button" className="cta" onClick={startCamera}>
-              カメラを起動（タップ必須）
+            <button type="button" className="cta" onClick={startCamera} disabled={camState === "on"}>
+              カメラを起動（外カメラ）
             </button>
 
             <div style={{ height: 12 }} />
@@ -142,13 +247,31 @@ export default function UploadClient() {
               />
             </div>
 
-            {camState === "on" && (
+            <div style={{ height: 12 }} />
+
+            {/* 録画ボタン */}
+            <div style={{ display: "flex", gap: 10 }}>
+              {recState !== "rec" ? (
+                <button
+                  type="button"
+                  className="cta"
+                  onClick={startRec}
+                  style={{ flex: 1 }}
+                  disabled={camState !== "on" || recState === "saving"}
+                >
+                  録画開始
+                </button>
+              ) : (
+                <button type="button" className="cta" onClick={stopRec} style={{ flex: 1 }}>
+                  録画停止
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={stopCamera}
                 style={{
-                  marginTop: 12,
-                  width: "100%",
+                  flex: 1,
                   background: "transparent",
                   border: "1px solid rgba(255,255,255,0.25)",
                   color: "#fff",
@@ -156,24 +279,42 @@ export default function UploadClient() {
                   borderRadius: 16,
                   fontWeight: 800,
                 }}
+                disabled={camState !== "on"}
               >
                 カメラ停止
               </button>
-            )}
+            </div>
+
+            {recState === "saving" && <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85 }}>保存中...</div>}
 
             {errMsg && (
-              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.9, lineHeight: 1.6 }}>
+              <div style={{ marginTop: 10, fontSize: 12, opacity: 0.85, whiteSpace: "pre-wrap" }}>
                 ⚠️ {errMsg}
-                <div style={{ marginTop: 8, opacity: 0.75 }}>
-                  現在のURL: {typeof window !== "undefined" ? window.location.href : ""}
-                </div>
+              </div>
+            )}
+
+            {/* プレビュー */}
+            {previewUrl && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8, opacity: 0.9 }}>録画プレビュー</div>
+                <video
+                  controls
+                  playsInline
+                  src={previewUrl}
+                  style={{ width: "100%", borderRadius: 14, border: "1px solid rgba(255,255,255,0.12)" }}
+                />
+                {savedId && (
+                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>
+                    ✅ 保存完了（id: {savedId}）
+                  </div>
+                )}
               </div>
             )}
           </div>
         </div>
 
-        <button type="button" className="cta" onClick={goAnalyze} style={{ marginTop: 14 }}>
-          解析へ進む（デモ）
+        <button type="button" className="cta" onClick={goAnalyze} style={{ marginTop: 14 }} disabled={!savedId}>
+          この動画で解析へ進む
         </button>
 
         <button
