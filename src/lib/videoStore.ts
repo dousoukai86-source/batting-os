@@ -1,5 +1,12 @@
 // src/lib/videoStore.ts
-// IndexedDB に動画 Blob を保存/取得する最小実装
+// IndexedDB に Blob(動画) を保存して、idで取り出す
+
+export type StoredVideo = {
+  id: string;
+  createdAt: number;
+  mimeType: string;
+  blob: Blob;
+};
 
 const DB_NAME = "batting_os_db";
 const DB_VERSION = 1;
@@ -21,45 +28,49 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function saveVideoBlob(blob: Blob): Promise<string> {
-  const db = await openDB();
+function tx<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return openDB().then(
+    (db) =>
+      new Promise<T>((resolve, reject) => {
+        const t = db.transaction(STORE, mode);
+        const store = t.objectStore(STORE);
+
+        const req = fn(store);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+
+        t.oncomplete = () => db.close();
+        t.onerror = () => {
+          db.close();
+          reject(t.error);
+        };
+      })
+  );
+}
+
+export async function saveVideo(blob: Blob, mimeType: string): Promise<string> {
   const id = `${Date.now()}_${Math.random().toString(16).slice(2)}`;
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    const store = tx.objectStore(STORE);
-    store.put({ id, blob, createdAt: Date.now(), type: blob.type, size: blob.size });
-
-    tx.oncomplete = () => resolve(id);
-    tx.onerror = () => reject(tx.error);
-  });
+  const item: StoredVideo = {
+    id,
+    createdAt: Date.now(),
+    mimeType: mimeType || blob.type || "video/mp4",
+    blob,
+  };
+  await tx("readwrite", (s) => s.put(item));
+  return id;
 }
 
-export async function loadVideoBlob(id: string): Promise<Blob | null> {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readonly");
-    const store = tx.objectStore(STORE);
-    const req = store.get(id);
-
-    req.onsuccess = () => {
-      const row = req.result as { blob: Blob } | undefined;
-      resolve(row?.blob ?? null);
-    };
-    req.onerror = () => reject(req.error);
-  });
+export async function loadVideo(id: string): Promise<StoredVideo | null> {
+  const res = await tx<any>("readonly", (s) => s.get(id));
+  return res ? (res as StoredVideo) : null;
 }
 
-export async function deleteVideoBlob(id: string): Promise<void> {
-  const db = await openDB();
+export async function getVideoObjectURL(id: string): Promise<string | null> {
+  const item = await loadVideo(id);
+  if (!item) return null;
+  return URL.createObjectURL(item.blob);
+}
 
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, "readwrite");
-    const store = tx.objectStore(STORE);
-    store.delete(id);
-
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-  });
+export async function deleteVideo(id: string): Promise<void> {
+  await tx("readwrite", (s) => s.delete(id));
 }

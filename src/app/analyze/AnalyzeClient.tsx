@@ -1,149 +1,152 @@
 "use client";
 
-// src/app/analyze/AnalyzeClient.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { makeDemoAnalysis, type CatId } from "@/lib/analysisText";
-import { addHistory } from "@/lib/history";
-import { loadVideoBlob } from "@/lib/videoStore";
+import { getVideoObjectURL } from "@/lib/videoStore";
 
-type Props = {
-  type: string; // route param: /analyze/[type]
-};
+type CatNum = 1 | 2 | 3 | 4;
 
-function toCatId(v: string | null | undefined): CatId | null {
-  const n = Number(v);
-  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
-  return null;
+function typeLabel(type: CatNum) {
+  return type === 1 ? "Ⅰ 前伸傾向" : type === 2 ? "Ⅱ 前沈傾向" : type === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 }
 
-function typeLabel(type: CatId) {
-  return type === 1
-    ? "Ⅰ 前伸傾向"
-    : type === 2
-    ? "Ⅱ 前沈傾向"
-    : type === 3
-    ? "Ⅲ 後伸傾向"
-    : "Ⅳ 後沈傾向";
+type MovieState =
+  | { kind: "live" }
+  | { kind: "video"; id: string; url: string }
+  | { kind: "loading"; msg: string }
+  | { kind: "error"; msg: string };
+
+function parseMovieParam(raw: string | null) {
+  if (!raw) return { kind: "live" as const };
+  if (raw === "live-camera") return { kind: "live" as const };
+
+  // movie=video:<id>
+  if (raw.startsWith("video:")) {
+    const id = raw.slice("video:".length).trim();
+    if (id) return { kind: "video" as const, id };
+  }
+
+  return { kind: "live" as const };
 }
 
-export default function AnalyzeClient({ type }: Props) {
+export default function AnalyzeClient({ type }: { type: CatNum }) {
   const router = useRouter();
   const sp = useSearchParams();
 
-  const cat = useMemo(() => toCatId(type), [type]);
+  const movieParam = sp.get("movie");
+  const parsed = useMemo(() => parseMovieParam(movieParam), [movieParam]);
 
-  const movieParam = useMemo(() => sp.get("movie") ?? "live-camera", [sp]);
+  const [movieState, setMovieState] = useState<MovieState>({ kind: "loading", msg: "読み込み中..." });
 
-  const [videoSrc, setVideoSrc] = useState<string | null>(null);
-  const [videoNote, setVideoNote] = useState<string>("");
-
-  // typeが不正ならトップへ
   useEffect(() => {
-    if (!cat) router.replace("/matrix");
-  }, [cat, router]);
+    let cancelled = false;
 
-  // movie を解決（idb:xxx の場合は IndexedDB から復元）
-  useEffect(() => {
-    let revoke: string | null = null;
-
-    const run = async () => {
-      setVideoSrc(null);
-      setVideoNote("");
-
-      if (movieParam.startsWith("idb:")) {
-        const id = movieParam.slice("idb:".length);
-        const blob = await loadVideoBlob(id);
-        if (!blob) {
-          setVideoNote("⚠️ 保存された動画が見つかりませんでした（端末を変えた/保存が消えた可能性）");
-          return;
-        }
-        const url = URL.createObjectURL(blob);
-        revoke = url;
-        setVideoSrc(url);
-        setVideoNote(`保存動画（${id}）`);
+    async function run() {
+      if (parsed.kind === "live") {
+        setMovieState({ kind: "live" });
         return;
       }
 
-      // live-camera や URL の場合
-      if (movieParam === "live-camera") {
-        setVideoNote("ライブカメラ（デモ解析）");
+      // video
+      setMovieState({ kind: "loading", msg: "保存動画を読み込み中..." });
+      const url = await getVideoObjectURL(parsed.id);
+
+      if (cancelled) return;
+
+      if (!url) {
+        setMovieState({ kind: "error", msg: "動画が見つかりません（保存が失敗した可能性）" });
         return;
       }
 
-      setVideoSrc(movieParam);
-      setVideoNote("指定URL動画");
-    };
+      setMovieState({ kind: "video", id: parsed.id, url });
+    }
 
     run();
-
     return () => {
-      if (revoke) URL.revokeObjectURL(revoke);
+      cancelled = true;
     };
-  }, [movieParam]);
+  }, [parsed.kind, (parsed as any).id]);
 
-  const categoryText = useMemo(() => (cat ? typeLabel(cat) : "未選択"), [cat]);
-
-  const runDemo = () => {
-    if (!cat) return;
-    const res = makeDemoAnalysis(cat);
-
-    addHistory({
-      type: res.type,
-      score: res.score,
-      comment: res.summary,
-      drill: res.nextDrill,
-      breakdown: res.breakdown,
-      src: movieParam, // ✅ idb:xxxx のまま保存（再解析で復元できる）
-    });
-
-    router.push("/history");
-  };
+  const title = `カテゴリ：${typeLabel(type)}`;
 
   return (
     <main>
       <div className="page">
         <div className="title">解析</div>
-        <div className="desc">カテゴリ：{categoryText}</div>
+        <div className="desc">{title}</div>
 
-        <div style={{ marginTop: 12 }}>
-          <div style={{ marginBottom: 8, opacity: 0.9, fontWeight: 800 }}>動画</div>
+        <div
+          style={{
+            marginTop: 14,
+            padding: 14,
+            borderRadius: 18,
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.10)",
+          }}
+        >
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>動画</div>
 
-          {/* 保存動画があるなら再生 */}
-          {videoSrc ? (
-            <video
-              controls
-              playsInline
-              src={videoSrc}
-              style={{
-                width: "100%",
-                borderRadius: 16,
-                background: "rgba(0,0,0,0.25)",
-                border: "1px solid rgba(255,255,255,0.12)",
-              }}
-            />
-          ) : (
+          {movieState.kind === "live" && (
             <div
               style={{
-                width: "100%",
-                aspectRatio: "16/9",
-                borderRadius: 16,
-                background: "rgba(255,255,255,0.06)",
+                borderRadius: 18,
                 border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(0,0,0,0.35)",
+                height: 220,
                 display: "grid",
                 placeItems: "center",
-                color: "rgba(255,255,255,0.75)",
-                fontWeight: 900,
+                opacity: 0.9,
               }}
             >
-              {movieParam === "live-camera" ? "カメラは起動しています（デモ解析用）" : "動画を読み込み中..."}
+              カメラは起動しています（デモ解析用）
             </div>
           )}
 
-          {videoNote && <div style={{ marginTop: 8, fontSize: 12, opacity: 0.85 }}>{videoNote}</div>}
+          {movieState.kind === "loading" && (
+            <div style={{ opacity: 0.9, lineHeight: 1.6 }}>
+              {movieState.msg}
+            </div>
+          )}
+
+          {movieState.kind === "error" && (
+            <div style={{ opacity: 0.95, lineHeight: 1.6 }}>
+              ⚠️ {movieState.msg}
+            </div>
+          )}
+
+          {movieState.kind === "video" && (
+            <>
+              <div
+                style={{
+                  borderRadius: 18,
+                  overflow: "hidden",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "#000",
+                }}
+              >
+                <video
+                  src={movieState.url}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  style={{
+                    width: "100%",
+                    height: 220,
+                    objectFit: "contain",
+                    display: "block",
+                  }}
+                />
+              </div>
+
+              <div style={{ marginTop: 8, opacity: 0.75, fontSize: 12 }}>
+                movie: video:{movieState.id}
+              </div>
+            </>
+          )}
         </div>
 
-        <button type="button" className="cta" onClick={runDemo} style={{ marginTop: 14 }} disabled={!cat}>
+        {/* ここは“デモ解析”のまま置いておく（本実装に合わせて差し替えOK） */}
+        <button type="button" className="cta" style={{ marginTop: 14 }} onClick={() => router.push("/history")}>
           解析を実行（デモ）
         </button>
 
@@ -151,12 +154,12 @@ export default function AnalyzeClient({ type }: Props) {
           type="button"
           onClick={() => router.push("/matrix")}
           style={{
-            marginTop: 12,
             width: "100%",
+            marginTop: 10,
             background: "transparent",
             border: "1px solid rgba(255,255,255,0.25)",
             color: "#fff",
-            padding: "12px",
+            padding: "14px",
             borderRadius: 16,
             fontWeight: 800,
           }}
