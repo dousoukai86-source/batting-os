@@ -1,4 +1,4 @@
-import AnalyzeClient from "./AnalyzeClient";
+import AnalyzeClient from "../AnalyzeClient";
 
 type CatNum = 1 | 2 | 3 | 4;
 
