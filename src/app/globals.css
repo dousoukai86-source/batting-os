@@ -1,174 +1,209 @@
-/* =========================
-   Global Reset
-========================= */
-* {
-  box-sizing: border-box;
+/* src/app/globals.css */
+
+/* ===== Design tokens ===== */
+:root{
+  --bg0:#070A10;
+  --bg1:#0B1020;
+  --card: rgba(255,255,255,.06);
+  --card2: rgba(255,255,255,.08);
+  --line: rgba(255,255,255,.12);
+  --line2: rgba(255,255,255,.18);
+  --text: rgba(255,255,255,.92);
+  --muted: rgba(255,255,255,.68);
+  --muted2: rgba(255,255,255,.52);
+
+  --brand:#3B82F6;
+  --brand2:#60A5FA;
+
+  --r12:12px;
+  --r16:16px;
+  --r20:20px;
+  --shadow: 0 12px 40px rgba(0,0,0,.55);
+  --shadow2: 0 10px 24px rgba(0,0,0,.45);
 }
 
-html, body {
-  margin: 0;
-  padding: 0;
-  background: #0b0e13;
-  color: #ffffff;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-    "Noto Sans JP", sans-serif;
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  color:var(--text);
+  background:
+    radial-gradient(1200px 600px at 50% -120px, rgba(59,130,246,.22), transparent 60%),
+    radial-gradient(900px 500px at 0% 20%, rgba(99,102,241,.14), transparent 55%),
+    radial-gradient(900px 500px at 100% 30%, rgba(16,185,129,.08), transparent 55%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* =========================
-   Background Logo (Watermark)
-========================= */
-body {
-  position: relative;
+a{ color:inherit; text-decoration:none; }
+
+/* ===== Layout ===== */
+main{
+  min-height:100%;
+  display:grid;
+  place-items:start center;
+  padding: 18px 14px 40px;
 }
 
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background-image: url("/bg-logo.png");
-  background-repeat: no-repeat;
-  background-position: center;
-  background-size: min(70vw, 520px);
-  opacity: 0.04;            /* ← 基本は薄く */
-  pointer-events: none;
-  z-index: 0;
+.page{
+  width: min(760px, 100%);
+  padding: 18px;
+  border-radius: var(--r20);
+  background: rgba(0,0,0,.10);
+  border: 1px solid rgba(255,255,255,.06);
 }
 
-/* =========================
-   Page Base
-========================= */
-main {
-  position: relative;
-  z-index: 1;
-  min-height: 100vh;
-  padding: 16px;
-}
-
-/* =========================
-   Analyze Page 専用（超重要）
-========================= */
-main.analyze {
-  background: #0b0e13;
-}
-
-/* 解析ページではロゴをほぼ消す */
-body:has(main.analyze)::before {
-  opacity: 0.015; /* ← 見えたら 0 にしてOK */
-}
-
-/* =========================
-   Readable Card UI
-========================= */
-.card,
-.panel,
-.box,
-.result,
-.score,
-.breakdown,
-.comment,
-section {
-  background: rgba(18, 22, 30, 0.94);
-  border: 1px solid rgba(255,255,255,0.14);
-  border-radius: 18px;
-  padding: 14px;
-  margin-bottom: 14px;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.45);
-}
-
-/* =========================
-   Typography
-========================= */
-h1, h2, h3 {
-  margin: 0 0 8px;
-  font-weight: 800;
-  color: #ffffff;
-}
-
-p {
-  margin: 0 0 8px;
-  color: rgba(255,255,255,0.9);
-}
-
-small,
-.muted {
-  color: rgba(255,255,255,0.7);
-}
-
-/* スコア強調 */
-.total,
-.scoreNum,
-.big {
-  font-size: 32px;
+.title{
+  font-size: 26px;
   font-weight: 900;
-  letter-spacing: 0.5px;
+  letter-spacing: .2px;
 }
 
-/* =========================
-   Buttons
-========================= */
-button {
-  appearance: none;
-  border: none;
-  border-radius: 16px;
+.desc{
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* ===== Cards ===== */
+.card{
+  margin-top: 12px;
   padding: 14px;
-  font-weight: 800;
+  border-radius: var(--r16);
+  background: var(--card);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow2);
+  backdrop-filter: blur(10px);
+}
+
+.cardTitle{
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.hr{
+  height:1px;
+  background: var(--line);
+  margin: 12px 0;
+}
+
+/* ===== Buttons ===== */
+.cta{
+  display:block;
+  width:100%;
+  border:none;
+  border-radius: 999px;
+  padding: 14px 16px;
+  font-weight: 900;
+  cursor:pointer;
+  background: linear-gradient(180deg, var(--brand2), var(--brand));
   color: #fff;
-  background: #2f80ff;
+  box-shadow: 0 10px 26px rgba(59,130,246,.22);
+  transition: transform .06s ease, filter .2s ease, opacity .2s ease;
 }
+.cta:active{ transform: scale(.99); }
+.cta:hover{ filter: brightness(1.02); }
+.cta:disabled{ opacity:.55; cursor:not-allowed; }
 
-button.secondary {
-  background: transparent;
-  border: 1px solid rgba(255,255,255,0.25);
+.btn{
+  display:block;
+  width:100%;
+  padding: 12px 14px;
+  border-radius: 999px;
+  font-weight: 900;
+  cursor:pointer;
+  background: rgba(255,255,255,.04);
+  border: 1px solid var(--line2);
+  color: var(--text);
+  transition: transform .06s ease, background .2s ease;
 }
+.btn:active{ transform: scale(.99); }
+.btn:hover{ background: rgba(255,255,255,.06); }
 
-/* =========================
-   List / History
-========================= */
-.list {
-  display: grid;
-  gap: 12px;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
-  border-radius: 16px;
-  background: rgba(18,22,30,0.94);
-  border: 1px solid rgba(255,255,255,0.12);
-}
-
-.rowTitle {
-  font-weight: 700;
-}
-
-.rowSub {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-/* =========================
-   Matrix
-========================= */
-.matrix {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.btnRow{
+  display:flex;
   gap: 10px;
 }
+.btnRow > *{ flex:1; }
 
-.cell {
-  height: 120px;
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 28px;
-  font-weight: 800;
+/* ===== Text helpers ===== */
+.small{ font-size: 12px; color: var(--muted2); }
+.kv{
+  display:flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
-.red { background: #ff5a5a; }
-.green { background: #32d26c; }
-.blue { background: #4da3ff; }
-.yellow { background: #ffd84d; }
+/* ===== History B numbers nicer ===== */
+.kpiGrid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 10px;
+}
+.kpi{
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.05);
+  border: 1px solid rgba(255,255,255,.10);
+}
+.kpiLabel{
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 800;
+}
+.kpiVal{
+  margin-top: 4px;
+  font-size: 18px;
+  font-weight: 950;
+  letter-spacing: .2px;
+}
+
+/* ---- Top cards polish ---- */
+.card {
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,0.25),
+    inset 0 1px 0 rgba(255,255,255,0.06);
+  backdrop-filter: blur(10px);
+}
+
+.hr {
+  height: 1px;
+  background: rgba(255,255,255,0.10); /* ちょい薄く */
+  margin: 12px 0;
+  border: none;
+}
+
+/* 右上の I/II/III をバッジ化したい場合（small クラス使ってる前提） */
+.small {
+  font-size: 12px;
+  opacity: 0.95;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(0,0,0,0.20);
+}
+
+/* ボタン間の“締まり” */
+.card .cta,
+.card .btn {
+  margin-top: 0;
+}
+
+/* リンク下線が出る環境対策 */
+.link {
+  text-decoration: none;
+}
+
+/* ===== Links look better when used as CTA ===== */
+.link{
+  display:block;
+}
