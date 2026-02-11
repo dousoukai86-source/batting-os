@@ -12,15 +12,10 @@ function toCatNum(v: string): CatNum {
   if (s === "III") return 3;
   if (s === "IV") return 4;
 
-  return 1; // fallback
+  return 1;
 }
 
-export default async function Page({
-  params,
-}: {
-  params: { type: string };
-}) {
+export default function Page({ params }: { params: { type: string } }) {
   const cat = toCatNum(params.type);
-
   return <AnalyzeClient type={cat} />;
 }
