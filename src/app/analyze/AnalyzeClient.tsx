@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { getVideoObjectURL } from "@/lib/videoStore";
 
 type CatNum = 1 | 2 | 3 | 4;
@@ -10,70 +10,85 @@ function typeLabel(type: CatNum) {
   return type === 1 ? "Ⅰ 前伸傾向" : type === 2 ? "Ⅱ 前沈傾向" : type === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 }
 
-type MovieState =
-  | { kind: "live" }
-  | { kind: "video"; id: string; url: string }
-  | { kind: "loading"; msg: string }
-  | { kind: "error"; msg: string };
+// movie 形式:
+// 1) 直URL (http/https)
+// 2) video:<id>  ← Uploadから渡すやつ
+function resolveMovieSource(movie: string) {
+  const m = (movie ?? "").trim();
+  if (!m) return { kind: "none" as const };
 
-function parseMovieParam(raw: string | null) {
-  if (!raw) return { kind: "live" as const };
-  if (raw === "live-camera") return { kind: "live" as const };
-
-  // movie=video:<id>
-  if (raw.startsWith("video:")) {
-    const id = raw.slice("video:".length).trim();
-    if (id) return { kind: "video" as const, id };
+  if (m.startsWith("video:")) {
+    const id = m.slice("video:".length);
+    return { kind: "videoId" as const, id };
   }
 
-  return { kind: "live" as const };
+  // URLっぽいのはそのまま
+  if (m.startsWith("http://") || m.startsWith("https://")) {
+    return { kind: "url" as const, url: m };
+  }
+
+  return { kind: "none" as const };
 }
 
-export default function AnalyzeClient({ type }: { type: CatNum }) {
+export default function AnalyzeClient({ type, movie }: { type: CatNum; movie: string }) {
   const router = useRouter();
-  const sp = useSearchParams();
+  const [err, setErr] = useState<string>("");
+  const [src, setSrc] = useState<string>(""); // <video src>
+  const [loading, setLoading] = useState(false);
 
-  const movieParam = sp.get("movie");
-  const parsed = useMemo(() => parseMovieParam(movieParam), [movieParam]);
+  const resolved = useMemo(() => resolveMovieSource(movie), [movie]);
 
-  const [movieState, setMovieState] = useState<MovieState>({ kind: "loading", msg: "読み込み中..." });
-
+  // ★重要：indexedDB/URL.createObjectURL 系はクライアントでしか動かさない
   useEffect(() => {
     let cancelled = false;
 
     async function run() {
-      if (parsed.kind === "live") {
-        setMovieState({ kind: "live" });
+      setErr("");
+      setSrc("");
+
+      if (resolved.kind === "none") {
+        setErr("動画が指定されていません。アップロードから入り直してください。");
         return;
       }
 
-      // video
-      setMovieState({ kind: "loading", msg: "保存動画を読み込み中..." });
-      const url = await getVideoObjectURL(parsed.id);
-
-      if (cancelled) return;
-
-      if (!url) {
-        setMovieState({ kind: "error", msg: "動画が見つかりません（保存が失敗した可能性）" });
+      if (resolved.kind === "url") {
+        setSrc(resolved.url);
         return;
       }
 
-      setMovieState({ kind: "video", id: parsed.id, url });
+      if (resolved.kind === "videoId") {
+        setLoading(true);
+        try {
+          const url = await getVideoObjectURL(resolved.id);
+          if (cancelled) return;
+
+          if (!url) {
+            setErr("保存した動画が見つかりません。アップロードから撮り直してください。");
+            setLoading(false);
+            return;
+          }
+
+          setSrc(url);
+          setLoading(false);
+        } catch (e: any) {
+          if (cancelled) return;
+          setErr(e?.message ?? "動画の読み込みに失敗しました。");
+          setLoading(false);
+        }
+      }
     }
 
     run();
     return () => {
       cancelled = true;
     };
-  }, [parsed.kind, (parsed as any).id]);
-
-  const title = `カテゴリ：${typeLabel(type)}`;
+  }, [resolved]);
 
   return (
     <main>
       <div className="page">
         <div className="title">解析</div>
-        <div className="desc">{title}</div>
+        <div className="desc">カテゴリ：{typeLabel(type)}</div>
 
         <div
           style={{
@@ -84,86 +99,35 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
             border: "1px solid rgba(255,255,255,0.10)",
           }}
         >
-          <div style={{ fontWeight: 900, marginBottom: 10 }}>動画</div>
+          <div style={{ fontWeight: 900, marginBottom: 10 }}>対象動画</div>
 
-          {movieState.kind === "live" && (
-            <div
+          <div
+            style={{
+              borderRadius: 18,
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "#000",
+            }}
+          >
+            <video
+              src={src}
+              controls
+              playsInline
+              preload="metadata"
               style={{
-                borderRadius: 18,
-                border: "1px solid rgba(255,255,255,0.12)",
-                background: "rgba(0,0,0,0.35)",
-                height: 220,
-                display: "grid",
-                placeItems: "center",
-                opacity: 0.9,
+                width: "100%",
+                height: 260,
+                objectFit: "contain",
+                display: "block",
               }}
-            >
-              カメラは起動しています（デモ解析用）
-            </div>
-          )}
+            />
+          </div>
 
-          {movieState.kind === "loading" && (
-            <div style={{ opacity: 0.9, lineHeight: 1.6 }}>
-              {movieState.msg}
-            </div>
-          )}
-
-          {movieState.kind === "error" && (
-            <div style={{ opacity: 0.95, lineHeight: 1.6 }}>
-              ⚠️ {movieState.msg}
-            </div>
-          )}
-
-          {movieState.kind === "video" && (
-            <>
-              <div
-                style={{
-                  borderRadius: 18,
-                  overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  background: "#000",
-                }}
-              >
-                <video
-                  src={movieState.url}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  style={{
-                    width: "100%",
-                    height: 220,
-                    objectFit: "contain",
-                    display: "block",
-                  }}
-                />
-              </div>
-
-              <div style={{ marginTop: 8, opacity: 0.75, fontSize: 12 }}>
-                movie: video:{movieState.id}
-              </div>
-            </>
-          )}
+          {loading && <div style={{ marginTop: 10, opacity: 0.9 }}>読み込み中...</div>}
+          {err && <div style={{ marginTop: 10, opacity: 0.9, lineHeight: 1.6 }}>⚠️ {err}</div>}
         </div>
 
-        {/* ここは“デモ解析”のまま置いておく（本実装に合わせて差し替えOK） */}
-        <button type="button" className="cta" style={{ marginTop: 14 }} onClick={() => router.push("/history")}>
-          解析を実行（デモ）
-        </button>
-
-        <button
-          type="button"
-          onClick={() => router.push("/matrix")}
-          style={{
-            width: "100%",
-            marginTop: 10,
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,0.25)",
-            color: "#fff",
-            padding: "14px",
-            borderRadius: 16,
-            fontWeight: 800,
-          }}
-        >
+        <button type="button" className="cta" style={{ marginTop: 14 }} onClick={() => router.push("/matrix")}>
           マトリクスへ戻る
         </button>
       </div>
