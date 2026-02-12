@@ -10,78 +10,66 @@ function typeLabel(type: CatNum) {
   return type === 1 ? "Ⅰ 前伸傾向" : type === 2 ? "Ⅱ 前沈傾向" : type === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 }
 
-const LAST_MOVIE_KEY = "batting_os_last_movie"; // Upload側でここに入れる
-
 export default function AnalyzeClient({
   type,
   initialMovie,
 }: {
   type: CatNum;
-  initialMovie?: string;
+  initialMovie?: string | null;
 }) {
   const router = useRouter();
 
-  const [errMsg, setErrMsg] = useState("");
-  const [movieSrc, setMovieSrc] = useState<string>(""); // videoタグのsrc
-  const [movieLabel, setMovieLabel] = useState<string>(""); // 表示用
+  const [movieKey, setMovieKey] = useState<string | null>(initialMovie ?? null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [err, setErr] = useState<string>("");
 
-  const title = useMemo(() => `カテゴリ：${typeLabel(type)}`, [type]);
-
+  // 初回：URL movie が無ければ localStorage から拾う
   useEffect(() => {
-    let canceled = false;
+    if (movieKey) return;
 
-    async function resolveMovie() {
-      setErrMsg("");
-      setMovieSrc("");
-      setMovieLabel("");
+    try {
+      const last = localStorage.getItem("batting_os_last_movie");
+      if (last) setMovieKey(last);
+    } catch {}
+  }, [movieKey]);
 
-      // 1) URLの movie を優先
-      let movie = (initialMovie ?? "").trim();
+  // movieKey を実URLに解決
+  useEffect(() => {
+    let revoked: string | null = null;
 
-      // 2) 無ければ「最後に保存した動画」を拾う
-      if (!movie) {
-        try {
-          movie = localStorage.getItem(LAST_MOVIE_KEY) ?? "";
-        } catch {}
-      }
+    async function run() {
+      setErr("");
+      setVideoUrl(null);
 
-      if (!movie) {
-        setErrMsg("動画が指定されていません。アップロードから入り直してください。");
-        return;
-      }
+      if (!movieKey) return;
 
-      // movie を覚えておく（リロード対策）
-      try {
-        localStorage.setItem(LAST_MOVIE_KEY, movie);
-      } catch {}
-
-      // video:<id> なら IndexedDB からURL化
-      if (movie.startsWith("video:")) {
-        const id = movie.slice("video:".length);
+      // video:<id> の場合：IndexedDB から objectURL
+      if (movieKey.startsWith("video:")) {
+        const id = movieKey.slice("video:".length);
         const url = await getVideoObjectURL(id);
-        if (canceled) return;
-
         if (!url) {
-          setErrMsg("保存済み動画が見つかりません（端末をまたいだ/履歴が消えた可能性）");
+          setErr("動画が見つかりません。アップロードからやり直してください。");
           return;
         }
-
-        setMovieSrc(url);
-        setMovieLabel(`video:${id}`);
+        revoked = url;
+        setVideoUrl(url);
         return;
       }
 
-      // それ以外は通常URLとして扱う
-      setMovieSrc(movie);
-      setMovieLabel(movie);
+      // それ以外はそのままURL扱い（将来拡張）
+      setVideoUrl(movieKey);
     }
 
-    resolveMovie();
+    run().catch((e: any) => {
+      setErr(e?.message ?? "解析ページでエラーが発生しました。");
+    });
 
     return () => {
-      canceled = true;
+      if (revoked) URL.revokeObjectURL(revoked);
     };
-  }, [initialMovie]);
+  }, [movieKey]);
+
+  const title = useMemo(() => `カテゴリ：${typeLabel(type)}`, [type]);
 
   return (
     <main>
@@ -109,7 +97,7 @@ export default function AnalyzeClient({
             }}
           >
             <video
-              src={movieSrc || ""}
+              src={videoUrl ?? ""}
               controls
               playsInline
               preload="metadata"
@@ -122,15 +110,15 @@ export default function AnalyzeClient({
             />
           </div>
 
-          {movieLabel && (
-            <div style={{ marginTop: 10, opacity: 0.85, fontSize: 12, wordBreak: "break-all" }}>
-              src: {movieLabel}
+          {!videoUrl && (
+            <div style={{ marginTop: 12, opacity: 0.95, lineHeight: 1.6 }}>
+              ⚠️ 動画が指定されていません。アップロードから入り直してください。
             </div>
           )}
 
-          {errMsg && (
-            <div style={{ marginTop: 10, opacity: 0.95, lineHeight: 1.6 }}>
-              ⚠️ {errMsg}
+          {err && (
+            <div style={{ marginTop: 12, opacity: 0.95, lineHeight: 1.6 }}>
+              ⚠️ {err}
             </div>
           )}
         </div>
@@ -138,8 +126,8 @@ export default function AnalyzeClient({
         <button
           type="button"
           className="cta"
-          onClick={() => router.push("/matrix")}
           style={{ marginTop: 14 }}
+          onClick={() => router.push("/matrix")}
         >
           マトリクスへ戻る
         </button>
