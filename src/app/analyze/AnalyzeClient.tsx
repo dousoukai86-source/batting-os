@@ -1,76 +1,87 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { getVideoObjectURL } from "@/lib/videoStore";
 
 type CatNum = 1 | 2 | 3 | 4;
-
-function toCatNum(v: string | null): CatNum | null {
-  if (!v) return null;
-  const n = Number(v);
-  if (n === 1 || n === 2 || n === 3 || n === 4) return n;
-
-  const s = v.toUpperCase();
-  if (s === "I") return 1;
-  if (s === "II") return 2;
-  if (s === "III") return 3;
-  if (s === "IV") return 4;
-  return null;
-}
 
 function typeLabel(type: CatNum) {
   return type === 1 ? "Ⅰ 前伸傾向" : type === 2 ? "Ⅱ 前沈傾向" : type === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 }
 
-export default function AnalyzeClient() {
+const LAST_MOVIE_KEY = "batting_os_last_movie"; // Upload側でここに入れる
+
+export default function AnalyzeClient({
+  type,
+  initialMovie,
+}: {
+  type: CatNum;
+  initialMovie?: string;
+}) {
   const router = useRouter();
-  const params = useParams<{ type?: string }>();
-  const sp = useSearchParams();
 
-  const cat = useMemo(() => toCatNum(params?.type ?? null), [params]);
-  const movieRaw = sp.get("movie"); // 例: "video:xxxx" or "blob:..." or "https://..."
+  const [errMsg, setErrMsg] = useState("");
+  const [movieSrc, setMovieSrc] = useState<string>(""); // videoタグのsrc
+  const [movieLabel, setMovieLabel] = useState<string>(""); // 表示用
 
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [err, setErr] = useState<string>("");
+  const title = useMemo(() => `カテゴリ：${typeLabel(type)}`, [type]);
 
   useEffect(() => {
-    let alive = true;
+    let canceled = false;
 
-    async function resolve() {
-      setErr("");
-      setVideoUrl(null);
+    async function resolveMovie() {
+      setErrMsg("");
+      setMovieSrc("");
+      setMovieLabel("");
 
-      if (!movieRaw) {
-        setErr("動画が指定されていません。アップロードから入り直してください。");
+      // 1) URLの movie を優先
+      let movie = (initialMovie ?? "").trim();
+
+      // 2) 無ければ「最後に保存した動画」を拾う
+      if (!movie) {
+        try {
+          movie = localStorage.getItem(LAST_MOVIE_KEY) ?? "";
+        } catch {}
+      }
+
+      if (!movie) {
+        setErrMsg("動画が指定されていません。アップロードから入り直してください。");
         return;
       }
 
-      // video:<id> を解決
-      if (movieRaw.startsWith("video:")) {
-        const id = movieRaw.slice("video:".length);
+      // movie を覚えておく（リロード対策）
+      try {
+        localStorage.setItem(LAST_MOVIE_KEY, movie);
+      } catch {}
+
+      // video:<id> なら IndexedDB からURL化
+      if (movie.startsWith("video:")) {
+        const id = movie.slice("video:".length);
         const url = await getVideoObjectURL(id);
-        if (!alive) return;
+        if (canceled) return;
 
         if (!url) {
-          setErr("保存した動画が見つかりませんでした。もう一度録画してください。");
+          setErrMsg("保存済み動画が見つかりません（端末をまたいだ/履歴が消えた可能性）");
           return;
         }
-        setVideoUrl(url);
+
+        setMovieSrc(url);
+        setMovieLabel(`video:${id}`);
         return;
       }
 
-      // それ以外はそのままURLとして扱う
-      setVideoUrl(movieRaw);
+      // それ以外は通常URLとして扱う
+      setMovieSrc(movie);
+      setMovieLabel(movie);
     }
 
-    resolve();
-    return () => {
-      alive = false;
-    };
-  }, [movieRaw]);
+    resolveMovie();
 
-  const title = cat ? `カテゴリ：${typeLabel(cat)}` : "カテゴリ：未選択";
+    return () => {
+      canceled = true;
+    };
+  }, [initialMovie]);
 
   return (
     <main>
@@ -98,23 +109,38 @@ export default function AnalyzeClient() {
             }}
           >
             <video
-              key={videoUrl ?? "none"}
-              src={videoUrl ?? undefined}
+              src={movieSrc || ""}
               controls
               playsInline
               preload="metadata"
-              style={{ width: "100%", height: 260, objectFit: "contain", display: "block" }}
+              style={{
+                width: "100%",
+                height: 320,
+                objectFit: "contain",
+                display: "block",
+              }}
             />
           </div>
 
-          {err && (
-            <div style={{ marginTop: 10, opacity: 0.9, lineHeight: 1.6 }}>
-              ⚠️ {err}
+          {movieLabel && (
+            <div style={{ marginTop: 10, opacity: 0.85, fontSize: 12, wordBreak: "break-all" }}>
+              src: {movieLabel}
+            </div>
+          )}
+
+          {errMsg && (
+            <div style={{ marginTop: 10, opacity: 0.95, lineHeight: 1.6 }}>
+              ⚠️ {errMsg}
             </div>
           )}
         </div>
 
-        <button type="button" className="cta" onClick={() => router.push("/matrix")} style={{ marginTop: 14 }}>
+        <button
+          type="button"
+          className="cta"
+          onClick={() => router.push("/matrix")}
+          style={{ marginTop: 14 }}
+        >
           マトリクスへ戻る
         </button>
       </div>

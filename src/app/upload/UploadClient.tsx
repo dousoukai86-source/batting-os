@@ -9,9 +9,11 @@ type CatNum = 1 | 2 | 3 | 4;
 function toCatNum(v: string | null): CatNum | null {
   if (!v) return null;
 
+  // 数字(1-4)
   const n = Number(v);
   if (n === 1 || n === 2 || n === 3 || n === 4) return n;
 
+  // ローマ(I/II/III/IV)
   const s = v.toUpperCase();
   if (s === "I") return 1;
   if (s === "II") return 2;
@@ -28,16 +30,19 @@ function typeLabel(type: CatNum) {
 // iPhone Safariでプレビューが真っ黒になりがち → mp4 優先で選ぶ
 function pickMimeType() {
   const candidates = [
+    // Safari(対応していれば) mp4(H.264) が最強
     "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4",
+    // だめなら webm
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
   ];
+
   for (const t of candidates) {
     if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(t)) return t;
   }
-  return "";
+  return ""; // 未指定で作る(最後の手段)
 }
 
 export default function UploadClient() {
@@ -51,16 +56,17 @@ export default function UploadClient() {
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
-  const previewUrlRef = useRef<string | null>(null);
+  const previewUrlRef = useRef<string | null>(null); // revoke用
 
   const [errMsg, setErrMsg] = useState<string>("");
   const [camState, setCamState] = useState<"off" | "on">("off");
   const [recState, setRecState] = useState<"idle" | "rec" | "saving">("idle");
 
-  const [useBackCam, setUseBackCam] = useState(true);
+  const [useBackCam, setUseBackCam] = useState(true); // 外カメラ優先
   const [savedId, setSavedId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
+  // クリーンアップ
   useEffect(() => {
     return () => {
       stopCamera();
@@ -85,9 +91,11 @@ export default function UploadClient() {
       return;
     }
 
+    // 既に起動中なら止めてから
     await stopCamera();
 
     try {
+      // iPhoneは environment が外カメラ
       const constraints: MediaStreamConstraints = {
         audio: true,
         video: {
@@ -104,7 +112,6 @@ export default function UploadClient() {
         videoRef.current.srcObject = stream;
         await videoRef.current.play().catch(() => {});
       }
-
       setCamState("on");
     } catch (e: any) {
       setCamState("off");
@@ -121,11 +128,14 @@ export default function UploadClient() {
     chunksRef.current = [];
 
     const s = streamRef.current;
-    if (s) s.getTracks().forEach((t) => t.stop());
+    if (s) {
+      s.getTracks().forEach((t) => t.stop());
+    }
     streamRef.current = null;
 
-    if (videoRef.current) videoRef.current.srcObject = null;
-
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     setCamState("off");
     setRecState("idle");
   }
@@ -168,9 +178,16 @@ export default function UploadClient() {
         const type = mr.mimeType || (mimeType || "");
         const blob = new Blob(chunksRef.current, { type: type || "video/mp4" });
 
+        // 保存
         const id = await saveVideo(blob, blob.type || type || "video/mp4");
         setSavedId(id);
 
+        // ✅ 追加：最後に保存した動画IDを記憶（解析で拾えるように）
+        try {
+          localStorage.setItem("batting_os_last_movie", `video:${id}`);
+        } catch {}
+
+        // プレビューURL（Safariが読める形式なら再生可能）
         const url = await getVideoObjectURL(id);
         if (url) setPreview(url);
 
@@ -182,7 +199,7 @@ export default function UploadClient() {
     };
 
     try {
-      mr.start(1000);
+      mr.start(1000); // 1秒ごとにdataavailable（安定）
       setRecState("rec");
     } catch (e: any) {
       setErrMsg(e?.message ?? "録画開始に失敗しました。");
@@ -211,9 +228,8 @@ export default function UploadClient() {
       alert("先に録画して保存してください。");
       return;
     }
-
-    const movieParam = `video:${savedId}`;
-    router.push(`/analyze/${category}?movie=${encodeURIComponent(movieParam)}`);
+    // Analyze側で movie=video:<id> を解決する
+    router.push(`/analyze/${category}?movie=${encodeURIComponent(`video:${savedId}`)}`);
   }
 
   const title = category ? `カテゴリ：${typeLabel(category)}` : "カテゴリ：未選択";
@@ -257,7 +273,12 @@ export default function UploadClient() {
               ref={videoRef}
               muted
               playsInline
-              style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }}
+              style={{
+                width: "100%",
+                height: 220,
+                objectFit: "cover",
+                display: "block",
+              }}
             />
           </div>
 
@@ -294,12 +315,12 @@ export default function UploadClient() {
             <button
               type="button"
               onClick={() => {
+                // 切替 → 一旦停止してから
                 const next = !useBackCam;
                 setUseBackCam(next);
                 stopCamera();
                 setErrMsg("");
               }}
-              disabled={recState !== "idle"}
               style={{
                 flex: 1,
                 background: "transparent",
@@ -309,6 +330,7 @@ export default function UploadClient() {
                 borderRadius: 14,
                 fontWeight: 800,
               }}
+              disabled={recState !== "idle"}
             >
               {useBackCam ? "インカメラに切替" : "外カメラに切替"}
             </button>
@@ -330,7 +352,11 @@ export default function UploadClient() {
             </button>
           </div>
 
-          {errMsg && <div style={{ marginTop: 10, opacity: 0.9, lineHeight: 1.6 }}>⚠️ {errMsg}</div>}
+          {errMsg && (
+            <div style={{ marginTop: 10, opacity: 0.9, lineHeight: 1.6 }}>
+              ⚠️ {errMsg}
+            </div>
+          )}
 
           <div style={{ marginTop: 14, fontWeight: 900, opacity: 0.95 }}>録画プレビュー</div>
 
@@ -344,16 +370,24 @@ export default function UploadClient() {
             }}
           >
             <video
-              key={previewUrl ?? "none"}
-              src={previewUrl ?? undefined}
+              src={previewUrl ?? ""}
               controls
               playsInline
               preload="metadata"
-              style={{ width: "100%", height: 200, objectFit: "contain", display: "block" }}
+              style={{
+                width: "100%",
+                height: 200,
+                objectFit: "contain",
+                display: "block",
+              }}
             />
           </div>
 
-          {savedId && <div style={{ marginTop: 10, opacity: 0.95 }}>✅ 保存完了（id: {savedId}）</div>}
+          {savedId && (
+            <div style={{ marginTop: 10, opacity: 0.95 }}>
+              ✅ 保存完了（id: {savedId}）
+            </div>
+          )}
         </div>
 
         <button
