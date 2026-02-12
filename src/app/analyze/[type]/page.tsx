@@ -12,19 +12,16 @@ function toCatNum(v: string): CatNum {
   if (s === "III") return 3;
   if (s === "IV") return 4;
 
-  // 不正値は 1 に倒す（サーバーを落とさない）
   return 1;
 }
 
-export default function Page({
+export default async function Page({
   params,
-  searchParams,
 }: {
-  params: { type: string };
-  searchParams?: { movie?: string };
+  params: Promise<{ type: string }>;
 }) {
-  const type = toCatNum(params.type);
-  const movie = searchParams?.movie ?? null; // ここでは触るだけ。復元はクライアントで。
+  const resolved = await params;
+  const type = toCatNum(resolved.type);
 
-  return <AnalyzeClient type={type} initialMovie={movie} />;
+  return <AnalyzeClient type={type} />;
 }
