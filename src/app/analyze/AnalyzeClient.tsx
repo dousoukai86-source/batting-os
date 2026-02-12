@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { getVideoObjectURL } from "@/lib/videoStore";
+import AngleChart from "@/components/AngleChart";
 
 // MediaPipe Tasks Vision
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
@@ -24,15 +25,12 @@ const LS_LAST_VIDEO_ID = "batting_os:lastVideoId";
 function clamp(n: number, a: number, b: number) {
   return Math.max(a, Math.min(b, n));
 }
-
 function vec(a: { x: number; y: number }, b: { x: number; y: number }) {
   return { x: b.x - a.x, y: b.y - a.y };
 }
-
 function dot(u: { x: number; y: number }, v: { x: number; y: number }) {
-  return u.x * v.x + u.y * v.y;
+  return u.x * u.x + u.y * v.y; // ←ミスると終わるので注意
 }
-
 function norm(u: { x: number; y: number }) {
   return Math.sqrt(u.x * u.x + u.y * u.y);
 }
@@ -44,35 +42,49 @@ function angleABC(a: { x: number; y: number }, b: { x: number; y: number }, c: {
   const nu = norm(u);
   const nv = norm(v);
   if (nu === 0 || nv === 0) return NaN;
-  const cos = clamp(dot(u, v) / (nu * nv), -1, 1);
+  const cos = clamp((u.x * v.x + u.y * v.y) / (nu * nv), -1, 1);
   return (Math.acos(cos) * 180) / Math.PI;
 }
 
 // 体幹の前傾（肩中点→股関節中点のベクトルと“鉛直”のなす角）
-// 0度=真っ直ぐ、値が大きいほど前傾
 function trunkLeanDeg(shoulderMid: { x: number; y: number }, hipMid: { x: number; y: number }) {
   const v = vec(hipMid, shoulderMid); // hip -> shoulder
   const nv = norm(v);
   if (nv === 0) return NaN;
-  // 鉛直上方向ベクトル(0,-1)
-  const cos = clamp((v.x * 0 + v.y * -1) / nv, -1, 1);
-  const deg = (Math.acos(cos) * 180) / Math.PI;
-  return deg;
+  const cos = clamp((v.x * 0 + v.y * -1) / nv, -1, 1); // 鉛直上(0,-1)
+  return (Math.acos(cos) * 180) / Math.PI;
 }
 
-type PoseMetrics = {
-  trunkLeanDeg: number; // 体幹前傾
-  hipAngleDeg: number; // 股関節角（肩-股-膝）
-  kneeAngleDeg: number; // 膝角（股-膝-足首）
-  visScore: number; // 可視性の平均
-  t: number; // そのフレームの秒（←追加）
+type FrameMetrics = {
+  t: number;
+  trunkLeanDeg: number;
+  hipAngleDeg: number;
+  kneeAngleDeg: number;
+  visScore: number;
+};
+
+type AvgMetrics = {
+  trunkLeanDeg: number;
+  hipAngleDeg: number;
+  kneeAngleDeg: number;
+  visScore: number;
 };
 
 type AnalysisResult = {
   frames: number;
   usedFrames: number;
-  avg: Omit<PoseMetrics, "t">;
-  peak: PoseMetrics; // peakは t を含む
+
+  avg: AvgMetrics;
+  peak: FrameMetrics;
+
+  // グラフ用（時系列）
+  series: {
+    trunk: number[];
+    hip: number[];
+    knee: number[];
+    t: number[];
+  };
+
   message: string;
 };
 
@@ -83,17 +95,14 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // ✅ ジャンプ先ref（最大前傾ブロック）
   const peakRef = useRef<HTMLDivElement | null>(null);
 
   const [movieUrl, setMovieUrl] = useState<string | null>(null);
   const [errMsg, setErrMsg] = useState("");
   const [status, setStatus] = useState<"idle" | "loading_video" | "ready" | "analyzing" | "done">("idle");
-
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
-  // 1) movie paramをクライアントで解決（SSR触らない）
   const movieParam = useMemo(() => sp.get("movie"), [sp]);
 
   useEffect(() => {
@@ -105,10 +114,8 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
       setProgress(null);
       setStatus("loading_video");
 
-      // 優先：URLのmovie
       let m = movieParam;
 
-      // 無ければ localStorage の最後の動画
       if (!m && typeof window !== "undefined") {
         const last = localStorage.getItem(LS_LAST_VIDEO_ID);
         if (last) m = `video:${last}`;
@@ -128,7 +135,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           if (!url) throw new Error("保存動画が見つかりません（IndexedDB）。録画し直してください。");
           if (!canceled) setMovieUrl(url);
         } else {
-          // 直接URL
           if (!canceled) setMovieUrl(m);
         }
 
@@ -143,29 +149,29 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
     }
 
     resolveMovie();
-
     return () => {
       canceled = true;
     };
   }, [movieParam]);
 
+  function goBack() {
+    router.push("/matrix");
+  }
+
   // ✅ 最大前傾へジャンプ（スクロール + 動画シーク）
   function jumpToPeak() {
-    // ページ内スクロール
     peakRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
 
-    // 動画も最大前傾の時刻へ（あれば）
     const video = videoElRef.current;
     const t = result?.peak?.t;
     if (video && typeof t === "number" && isFinite(t)) {
       try {
-        video.currentTime = Math.max(0, t - 0.1); // ちょい手前
+        video.currentTime = Math.max(0, t - 0.1);
         video.pause();
       } catch {}
     }
   }
 
-  // 2) 解析ボタン押したら MediaPipe でフレーム解析
   async function runAnalysis() {
     setErrMsg("");
     setResult(null);
@@ -182,7 +188,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
     setStatus("analyzing");
 
     try {
-      // videoを確実に読み込む
       await new Promise<void>((resolve, reject) => {
         const onLoaded = () => resolve();
         const onErr = () => reject(new Error("動画の読み込みに失敗しました。"));
@@ -195,14 +200,12 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
         video.load();
       });
 
-      // iPhone対策：再生できる状態に
       await video.play().catch(() => {});
       video.pause();
 
       const duration = video.duration;
       if (!isFinite(duration) || duration <= 0) throw new Error("動画の長さが取得できませんでした。");
 
-      // Canvasサイズ（動画サイズに合わせる）
       const w = video.videoWidth || 720;
       const h = video.videoHeight || 1280;
       canvas.width = w;
@@ -210,7 +213,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
       const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error("Canvasが初期化できませんでした。");
 
-      // MediaPipe PoseLandmarker 初期化（WASMはCDNから）
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       );
@@ -224,16 +226,14 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
         numPoses: 1,
       });
 
-      // フレーム抽出設定
       const sampleFps = 6;
       const totalFrames = Math.max(1, Math.floor(duration * sampleFps));
       const step = duration / totalFrames;
 
       setProgress({ current: 0, total: totalFrames });
 
-      const metricsList: PoseMetrics[] = [];
+      const list: FrameMetrics[] = [];
 
-      // landmark index
       function pickSide(landmarks: any[]) {
         const l = { sh: landmarks[11], hip: landmarks[23], knee: landmarks[25], ank: landmarks[27] };
         const r = { sh: landmarks[12], hip: landmarks[24], knee: landmarks[26], ank: landmarks[28] };
@@ -243,7 +243,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           (r.sh.visibility ?? 0) + (r.hip.visibility ?? 0) + (r.knee.visibility ?? 0) + (r.ank.visibility ?? 0);
         return lVis >= rVis ? { side: "L" as const, ...l } : { side: "R" as const, ...r };
       }
-
       function mid(a: any, b: any) {
         return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       }
@@ -291,50 +290,70 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
 
         if (!isFinite(trunk) || !isFinite(hipAng) || !isFinite(kneeAng)) continue;
 
-        metricsList.push({
+        list.push({
+          t,
           trunkLeanDeg: trunk,
           hipAngleDeg: hipAng,
           kneeAngleDeg: kneeAng,
           visScore,
-          t, // ✅ その時刻を保存
         });
       }
 
       landmarker.close();
 
-      if (metricsList.length === 0) {
+      if (list.length === 0) {
         throw new Error(
           "姿勢推定に失敗しました（有効フレーム0）。\n明るい場所・全身が入る・カメラ固定で撮り直してください。"
         );
       }
 
-      const avg = avgMetrics(metricsList);
-      const peak = peakMetrics(metricsList);
+      const avg = avgMetrics(list);
+      const peak = peakMetrics(list);
+
+      const series = {
+        trunk: list.map((m) => m.trunkLeanDeg),
+        hip: list.map((m) => m.hipAngleDeg),
+        knee: list.map((m) => m.kneeAngleDeg),
+        t: list.map((m) => m.t),
+      };
+
       const message = buildMessage(type, avg, peak);
 
       setResult({
         frames: totalFrames,
-        usedFrames: metricsList.length,
+        usedFrames: list.length,
         avg,
         peak,
+        series,
         message,
       });
 
       setStatus("done");
-
-      // ✅ 解析が終わったら、結果のあたりへ軽くスクロールしたいならここ
-      // peakRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e: any) {
       setStatus("ready");
       setErrMsg(e?.message ?? "解析に失敗しました。");
     }
   }
 
-  function goBack() {
-    router.push("/matrix");
-  }
-
   const title = `カテゴリ：${typeLabel(type)}`;
+
+  // ✅ A: 評価ゾーン（見やすさ強化）
+  // ※この数値は「仮の見やすい帯」。あとでチューニングする前提でOK
+  const zonesTrunk = [
+    { from: 0, to: 12, color: "rgba(255,255,255,0.05)", label: "立ち気味" },
+    { from: 12, to: 25, color: "rgba(90,160,255,0.12)", label: "目安" },
+    { from: 25, to: 60, color: "rgba(255,120,120,0.10)", label: "前傾大" },
+  ];
+  const zonesHip = [
+    { from: 110, to: 150, color: "rgba(255,120,120,0.08)", label: "浅い" },
+    { from: 150, to: 175, color: "rgba(90,160,255,0.12)", label: "目安" },
+    { from: 175, to: 200, color: "rgba(255,255,255,0.05)", label: "伸びすぎ" },
+  ];
+  const zonesKnee = [
+    { from: 110, to: 150, color: "rgba(255,120,120,0.08)", label: "入りすぎ" },
+    { from: 150, to: 175, color: "rgba(90,160,255,0.12)", label: "目安" },
+    { from: 175, to: 200, color: "rgba(255,255,255,0.05)", label: "伸びすぎ" },
+  ];
 
   return (
     <main>
@@ -367,16 +386,10 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
               controls
               playsInline
               preload="metadata"
-              style={{
-                width: "100%",
-                height: 300,
-                objectFit: "contain",
-                display: "block",
-              }}
+              style={{ width: "100%", height: 300, objectFit: "contain", display: "block" }}
             />
           </div>
 
-          {/* 解析用 hidden canvas */}
           <canvas ref={canvasRef} style={{ display: "none" }} />
 
           {errMsg && (
@@ -430,35 +443,66 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           </div>
         </div>
 
-        {/* ✅ 結果表示 */}
         {result && (
-          <div
-            style={{
-              marginTop: 14,
-              padding: 14,
-              borderRadius: 18,
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.10)",
-            }}
-          >
-            <div style={{ fontWeight: 900, marginBottom: 10 }}>結果</div>
+          <div style={{ marginTop: 14 }}>
+            {/* 結果テキスト */}
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 18,
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,255,255,0.10)",
+              }}
+            >
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>結果</div>
 
-            <div style={{ opacity: 0.95, lineHeight: 1.8 }}>
-              <div>🧾 サンプル：{result.frames} frames（有効 {result.usedFrames}）</div>
-              <div>平均 体幹前傾：{result.avg.trunkLeanDeg.toFixed(1)}°</div>
-              <div>平均 股関節角：{result.avg.hipAngleDeg.toFixed(1)}°</div>
-              <div>平均 膝角：{result.avg.kneeAngleDeg.toFixed(1)}°</div>
-              <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>✅ {result.message}</div>
+              <div style={{ opacity: 0.95, lineHeight: 1.8 }}>
+                <div>🧾 サンプル：{result.frames} frames（有効 {result.usedFrames}）</div>
+                <div>平均 体幹前傾：{result.avg.trunkLeanDeg.toFixed(1)}°</div>
+                <div>平均 股関節角：{result.avg.hipAngleDeg.toFixed(1)}°</div>
+                <div>平均 膝角：{result.avg.kneeAngleDeg.toFixed(1)}°</div>
+                <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>✅ {result.message}</div>
 
-              {/* ✅ ジャンプボタン */}
-              <div style={{ marginTop: 12 }}>
-                <button type="button" className="cta" onClick={jumpToPeak} style={{ width: "100%" }}>
-                  最大前傾フレームへジャンプ
-                </button>
+                <div style={{ marginTop: 12 }}>
+                  <button type="button" className="cta" onClick={jumpToPeak} style={{ width: "100%" }}>
+                    最大前傾フレームへジャンプ
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* ✅ ジャンプ先 */}
+            {/* グラフ（ここが消えてたので復活） */}
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>グラフ</div>
+
+              <div style={{ display: "grid", gap: 12 }}>
+                <AngleChart
+                  title="体幹前傾"
+                  data={result.series.trunk}
+                  avg={result.avg.trunkLeanDeg}
+                  peak={result.peak.trunkLeanDeg}
+                  zones={zonesTrunk}
+                />
+
+                <AngleChart
+                  title="股関節角"
+                  data={result.series.hip}
+                  avg={result.avg.hipAngleDeg}
+                  peak={result.peak.hipAngleDeg}
+                  zones={zonesHip}
+                />
+
+                <AngleChart
+                  title="膝角"
+                  data={result.series.knee}
+                  avg={result.avg.kneeAngleDeg}
+                  peak={result.peak.kneeAngleDeg}
+                  zones={zonesKnee}
+                />
+              </div>
+            </div>
+
+            {/* ジャンプ先 */}
             <div ref={peakRef} style={{ marginTop: 16 }}>
               <div style={{ fontWeight: 900, marginBottom: 10 }}>最大前傾フレーム（自動抽出）</div>
 
@@ -502,7 +546,7 @@ async function seekVideo(video: HTMLVideoElement, time: number) {
   });
 }
 
-function avgMetrics(list: PoseMetrics[]): Omit<PoseMetrics, "t"> {
+function avgMetrics(list: FrameMetrics[]): AvgMetrics {
   const n = list.length;
   const sum = list.reduce(
     (acc, m) => {
@@ -514,6 +558,7 @@ function avgMetrics(list: PoseMetrics[]): Omit<PoseMetrics, "t"> {
     },
     { trunkLeanDeg: 0, hipAngleDeg: 0, kneeAngleDeg: 0, visScore: 0 }
   );
+
   return {
     trunkLeanDeg: sum.trunkLeanDeg / n,
     hipAngleDeg: sum.hipAngleDeg / n,
@@ -522,7 +567,7 @@ function avgMetrics(list: PoseMetrics[]): Omit<PoseMetrics, "t"> {
   };
 }
 
-function peakMetrics(list: PoseMetrics[]): PoseMetrics {
+function peakMetrics(list: FrameMetrics[]): FrameMetrics {
   let best = list[0];
   for (const m of list) {
     if (m.trunkLeanDeg > best.trunkLeanDeg) best = m;
@@ -530,7 +575,7 @@ function peakMetrics(list: PoseMetrics[]): PoseMetrics {
   return best;
 }
 
-function buildMessage(type: CatNum, avg: Omit<PoseMetrics, "t">, peak: PoseMetrics) {
+function buildMessage(type: CatNum, avg: AvgMetrics, peak: FrameMetrics) {
   const trunk = avg.trunkLeanDeg;
   const hip = avg.hipAngleDeg;
   const knee = avg.kneeAngleDeg;
