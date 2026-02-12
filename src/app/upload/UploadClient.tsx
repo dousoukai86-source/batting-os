@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { saveVideo } from "@/lib/videoStore";
+import { getVideoObjectURL, saveVideo } from "@/lib/videoStore";
 
 type CatNum = 1 | 2 | 3 | 4;
 
 function toCatNum(v: string | null): CatNum | null {
   if (!v) return null;
+
   const n = Number(v);
   if (n === 1 || n === 2 || n === 3 || n === 4) return n;
 
@@ -16,6 +17,7 @@ function toCatNum(v: string | null): CatNum | null {
   if (s === "II") return 2;
   if (s === "III") return 3;
   if (s === "IV") return 4;
+
   return null;
 }
 
@@ -23,11 +25,12 @@ function typeLabel(type: CatNum) {
   return type === 1 ? "Ⅰ 前伸傾向" : type === 2 ? "Ⅱ 前沈傾向" : type === 3 ? "Ⅲ 後伸傾向" : "Ⅳ 後沈傾向";
 }
 
+// iPhone Safariでプレビューが真っ黒になりがち → mp4 優先で選ぶ
 function pickMimeType() {
   const candidates = [
-    // iOS Safari だと mp4 が最優先（対応してれば）
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
     "video/mp4",
-    // webm は iOS でプレビュー死にやすいので最後の最後
+    "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
   ];
@@ -44,16 +47,13 @@ export default function UploadClient() {
   const categoryRaw = sp.get("category");
   const category = useMemo(() => toCatNum(categoryRaw), [categoryRaw]);
 
-  const liveVideoRef = useRef<HTMLVideoElement | null>(null);
-
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<BlobPart[]>([]);
+  const previewUrlRef = useRef<string | null>(null);
 
-  const previewRef = useRef<HTMLVideoElement | null>(null);
-  const previewUrlRef = useRef<string | null>(null); // revoke用
-
-  const [errMsg, setErrMsg] = useState("");
+  const [errMsg, setErrMsg] = useState<string>("");
   const [camState, setCamState] = useState<"off" | "on">("off");
   const [recState, setRecState] = useState<"idle" | "rec" | "saving">("idle");
 
@@ -61,7 +61,6 @@ export default function UploadClient() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // cleanup
   useEffect(() => {
     return () => {
       stopCamera();
@@ -69,16 +68,6 @@ export default function UploadClient() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // previewUrlが変わったら load して確実に反映（iOS対策）
-  useEffect(() => {
-    const v = previewRef.current;
-    if (!v) return;
-    if (!previewUrl) return;
-    try {
-      v.load();
-    } catch {}
-  }, [previewUrl]);
 
   function setPreview(url: string | null) {
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
@@ -111,10 +100,9 @@ export default function UploadClient() {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
-      const v = liveVideoRef.current;
-      if (v) {
-        v.srcObject = stream;
-        await v.play().catch(() => {});
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
       }
 
       setCamState("on");
@@ -136,8 +124,7 @@ export default function UploadClient() {
     if (s) s.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
 
-    const v = liveVideoRef.current;
-    if (v) v.srcObject = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
 
     setCamState("off");
     setRecState("idle");
@@ -178,16 +165,14 @@ export default function UploadClient() {
     mr.onstop = async () => {
       setRecState("saving");
       try {
-        const type = mr.mimeType || mimeType || "video/mp4";
-        const blob = new Blob(chunksRef.current, { type });
+        const type = mr.mimeType || (mimeType || "");
+        const blob = new Blob(chunksRef.current, { type: type || "video/mp4" });
 
-        // ✅ 重要：プレビューは「保存から取り直さない」。blob直でURL作る
-        const localUrl = URL.createObjectURL(blob);
-        setPreview(localUrl);
-
-        // ✅ 保存は別でやる（保存はできてる前提なのでOK）
-        const id = await saveVideo(blob, blob.type || type);
+        const id = await saveVideo(blob, blob.type || type || "video/mp4");
         setSavedId(id);
+
+        const url = await getVideoObjectURL(id);
+        if (url) setPreview(url);
 
         setRecState("idle");
       } catch (e: any) {
@@ -197,7 +182,7 @@ export default function UploadClient() {
     };
 
     try {
-      mr.start(250); // 細かめに切る方が安定しがち
+      mr.start(1000);
       setRecState("rec");
     } catch (e: any) {
       setErrMsg(e?.message ?? "録画開始に失敗しました。");
@@ -226,7 +211,9 @@ export default function UploadClient() {
       alert("先に録画して保存してください。");
       return;
     }
-    router.push(`/analyze/${category}?movie=${encodeURIComponent(`video:${savedId}`)}`);
+
+    const movieParam = `video:${savedId}`;
+    router.push(`/analyze/${category}?movie=${encodeURIComponent(movieParam)}`);
   }
 
   const title = category ? `カテゴリ：${typeLabel(category)}` : "カテゴリ：未選択";
@@ -248,7 +235,12 @@ export default function UploadClient() {
         >
           <div style={{ fontWeight: 900, marginBottom: 10 }}>カメラ</div>
 
-          <button type="button" className="cta" onClick={startCamera} disabled={camState === "on" || recState !== "idle"}>
+          <button
+            type="button"
+            className="cta"
+            onClick={startCamera}
+            disabled={camState === "on" || recState !== "idle"}
+          >
             {useBackCam ? "カメラを起動（外カメラ）" : "カメラを起動（インカメラ）"}
           </button>
 
@@ -262,7 +254,7 @@ export default function UploadClient() {
             }}
           >
             <video
-              ref={liveVideoRef}
+              ref={videoRef}
               muted
               playsInline
               style={{ width: "100%", height: 220, objectFit: "cover", display: "block" }}
@@ -307,6 +299,7 @@ export default function UploadClient() {
                 stopCamera();
                 setErrMsg("");
               }}
+              disabled={recState !== "idle"}
               style={{
                 flex: 1,
                 background: "transparent",
@@ -316,7 +309,6 @@ export default function UploadClient() {
                 borderRadius: 14,
                 fontWeight: 800,
               }}
-              disabled={recState !== "idle"}
             >
               {useBackCam ? "インカメラに切替" : "外カメラに切替"}
             </button>
@@ -352,8 +344,7 @@ export default function UploadClient() {
             }}
           >
             <video
-              ref={previewRef}
-              key={previewUrl ?? "none"}   // ✅ iOS反映用
+              key={previewUrl ?? "none"}
               src={previewUrl ?? undefined}
               controls
               playsInline
