@@ -138,10 +138,11 @@ export default function UploadClient() {
 
       const id = await saveVideo(blob, blob.type);
       setSavedId(id);
+      localStorage.setItem("batting_os:lastVideoId", id);
 
       // ★★★★★ 超重要 ★★★★★
       // 最後の動画を localStorage に保存
-      localStorage.setItem("batting_os_last_movie", `video:${id}`);
+      
 
       const url = await getVideoObjectURL(id);
       if (url) setPreview(url);

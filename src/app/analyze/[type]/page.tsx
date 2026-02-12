@@ -1,3 +1,4 @@
+// src/app/analyze/[type]/page.tsx
 import AnalyzeClient from "../AnalyzeClient";
 
 type CatNum = 1 | 2 | 3 | 4;
@@ -12,16 +13,11 @@ function toCatNum(v: string): CatNum {
   if (s === "III") return 3;
   if (s === "IV") return 4;
 
-  return 1;
+  return 1; // 保険
 }
 
-export default async function Page({
-  params,
-}: {
-  params: Promise<{ type: string }>;
-}) {
+export default async function Page({ params }: { params: Promise<{ type: string }> }) {
   const resolved = await params;
   const type = toCatNum(resolved.type);
-
   return <AnalyzeClient type={type} />;
 }
