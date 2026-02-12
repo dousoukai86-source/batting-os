@@ -65,26 +65,14 @@ type PoseMetrics = {
   hipAngleDeg: number; // 股関節角（肩-股-膝）
   kneeAngleDeg: number; // 膝角（股-膝-足首）
   visScore: number; // 可視性の平均
-};
-
-type SeriesPoint = {
-  t: number; // 秒
-  m: PoseMetrics;
-};
-
-type PeakInfo = {
-  t: number;
-  m: PoseMetrics;
-  // ピークフレームを静止画にしたい場合（任意）
-  thumbDataUrl?: string;
+  t: number; // そのフレームの秒（←追加）
 };
 
 type AnalysisResult = {
   frames: number;
   usedFrames: number;
-  avg: PoseMetrics;
-  peak: PoseMetrics;
-  peakInfo: PeakInfo;
+  avg: Omit<PoseMetrics, "t">;
+  peak: PoseMetrics; // peakは t を含む
   message: string;
 };
 
@@ -95,6 +83,9 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // ✅ ジャンプ先ref（最大前傾ブロック）
+  const peakRef = useRef<HTMLDivElement | null>(null);
+
   const [movieUrl, setMovieUrl] = useState<string | null>(null);
   const [errMsg, setErrMsg] = useState("");
   const [status, setStatus] = useState<"idle" | "loading_video" | "ready" | "analyzing" | "done">("idle");
@@ -102,10 +93,7 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
-  // グラフ用
-  const [series, setSeries] = useState<SeriesPoint[]>([]);
-
-  // movie paramをクライアントで解決（SSR触らない）
+  // 1) movie paramをクライアントで解決（SSR触らない）
   const movieParam = useMemo(() => sp.get("movie"), [sp]);
 
   useEffect(() => {
@@ -114,7 +102,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
     async function resolveMovie() {
       setErrMsg("");
       setResult(null);
-      setSeries([]);
       setProgress(null);
       setStatus("loading_video");
 
@@ -141,8 +128,10 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           if (!url) throw new Error("保存動画が見つかりません（IndexedDB）。録画し直してください。");
           if (!canceled) setMovieUrl(url);
         } else {
+          // 直接URL
           if (!canceled) setMovieUrl(m);
         }
+
         if (!canceled) setStatus("ready");
       } catch (e: any) {
         if (!canceled) {
@@ -160,10 +149,26 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
     };
   }, [movieParam]);
 
+  // ✅ 最大前傾へジャンプ（スクロール + 動画シーク）
+  function jumpToPeak() {
+    // ページ内スクロール
+    peakRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+    // 動画も最大前傾の時刻へ（あれば）
+    const video = videoElRef.current;
+    const t = result?.peak?.t;
+    if (video && typeof t === "number" && isFinite(t)) {
+      try {
+        video.currentTime = Math.max(0, t - 0.1); // ちょい手前
+        video.pause();
+      } catch {}
+    }
+  }
+
+  // 2) 解析ボタン押したら MediaPipe でフレーム解析
   async function runAnalysis() {
     setErrMsg("");
     setResult(null);
-    setSeries([]);
     setProgress(null);
 
     const video = videoElRef.current;
@@ -219,20 +224,23 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
         numPoses: 1,
       });
 
-      const sampleFps = 6; // 重ければ 3
+      // フレーム抽出設定
+      const sampleFps = 6;
       const totalFrames = Math.max(1, Math.floor(duration * sampleFps));
       const step = duration / totalFrames;
 
       setProgress({ current: 0, total: totalFrames });
 
       const metricsList: PoseMetrics[] = [];
-      const seriesList: SeriesPoint[] = [];
 
+      // landmark index
       function pickSide(landmarks: any[]) {
         const l = { sh: landmarks[11], hip: landmarks[23], knee: landmarks[25], ank: landmarks[27] };
         const r = { sh: landmarks[12], hip: landmarks[24], knee: landmarks[26], ank: landmarks[28] };
-        const lVis = (l.sh.visibility ?? 0) + (l.hip.visibility ?? 0) + (l.knee.visibility ?? 0) + (l.ank.visibility ?? 0);
-        const rVis = (r.sh.visibility ?? 0) + (r.hip.visibility ?? 0) + (r.knee.visibility ?? 0) + (r.ank.visibility ?? 0);
+        const lVis =
+          (l.sh.visibility ?? 0) + (l.hip.visibility ?? 0) + (l.knee.visibility ?? 0) + (l.ank.visibility ?? 0);
+        const rVis =
+          (r.sh.visibility ?? 0) + (r.hip.visibility ?? 0) + (r.knee.visibility ?? 0) + (r.ank.visibility ?? 0);
         return lVis >= rVis ? { side: "L" as const, ...l } : { side: "R" as const, ...r };
       }
 
@@ -240,7 +248,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
         return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       }
 
-      // time を動かしながら解析
       for (let i = 0; i < totalFrames; i++) {
         const t = i * step;
 
@@ -284,10 +291,13 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
 
         if (!isFinite(trunk) || !isFinite(hipAng) || !isFinite(kneeAng)) continue;
 
-        const m: PoseMetrics = { trunkLeanDeg: trunk, hipAngleDeg: hipAng, kneeAngleDeg: kneeAng, visScore };
-
-        metricsList.push(m);
-        seriesList.push({ t, m });
+        metricsList.push({
+          trunkLeanDeg: trunk,
+          hipAngleDeg: hipAng,
+          kneeAngleDeg: kneeAng,
+          visScore,
+          t, // ✅ その時刻を保存
+        });
       }
 
       landmarker.close();
@@ -298,38 +308,22 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
         );
       }
 
-      // 集計
       const avg = avgMetrics(metricsList);
       const peak = peakMetrics(metricsList);
-
-      // ✅ A：最大前傾フレーム（seriesから取る）
-      const peakPt = findPeakSeries(seriesList);
-
-      // 任意：ピークフレームの静止画作る（重ければコメントアウト可）
-      // いまの canvas を使ってサムネを作る
-      let thumbDataUrl: string | undefined;
-      try {
-        // ピークにシーク→描画→画像化
-        await seekVideo(video, peakPt.t);
-        ctx.drawImage(video, 0, 0, w, h);
-        thumbDataUrl = canvas.toDataURL("image/jpeg", 0.85);
-      } catch {
-        // 失敗しても致命じゃない
-      }
-
       const message = buildMessage(type, avg, peak);
 
-      setSeries(seriesList);
       setResult({
         frames: totalFrames,
         usedFrames: metricsList.length,
         avg,
         peak,
-        peakInfo: { t: peakPt.t, m: peakPt.m, thumbDataUrl },
         message,
       });
 
       setStatus("done");
+
+      // ✅ 解析が終わったら、結果のあたりへ軽くスクロールしたいならここ
+      // peakRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e: any) {
       setStatus("ready");
       setErrMsg(e?.message ?? "解析に失敗しました。");
@@ -338,14 +332,6 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
 
   function goBack() {
     router.push("/matrix");
-  }
-
-  function jumpToPeak() {
-    if (!result || !videoElRef.current) return;
-    const v = videoElRef.current;
-    v.currentTime = result.peakInfo.t;
-    v.play().catch(() => {});
-    setTimeout(() => v.pause(), 450); // ちょい再生して止める（iPhone対策）
   }
 
   const title = `カテゴリ：${typeLabel(type)}`;
@@ -444,7 +430,7 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           </div>
         </div>
 
-        {/* ✅ 結果 + A：最大前傾フレーム表示 */}
+        {/* ✅ 結果表示 */}
         {result && (
           <div
             style={{
@@ -457,93 +443,42 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
           >
             <div style={{ fontWeight: 900, marginBottom: 10 }}>結果</div>
 
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <Chip label={`サンプル: ${result.frames}（有効 ${result.usedFrames}）`} />
-              <Chip label={`平均 体幹前傾: ${result.avg.trunkLeanDeg.toFixed(1)}°`} />
-              <Chip label={`平均 股関節角: ${result.avg.hipAngleDeg.toFixed(1)}°`} />
-              <Chip label={`平均 膝角: ${result.avg.kneeAngleDeg.toFixed(1)}°`} />
-              <Chip label={`最大前傾(Peak): ${result.peakInfo.m.trunkLeanDeg.toFixed(1)}° @ ${result.peakInfo.t.toFixed(2)}s`} />
+            <div style={{ opacity: 0.95, lineHeight: 1.8 }}>
+              <div>🧾 サンプル：{result.frames} frames（有効 {result.usedFrames}）</div>
+              <div>平均 体幹前傾：{result.avg.trunkLeanDeg.toFixed(1)}°</div>
+              <div>平均 股関節角：{result.avg.hipAngleDeg.toFixed(1)}°</div>
+              <div>平均 膝角：{result.avg.kneeAngleDeg.toFixed(1)}°</div>
+              <div style={{ marginTop: 10, whiteSpace: "pre-wrap" }}>✅ {result.message}</div>
+
+              {/* ✅ ジャンプボタン */}
+              <div style={{ marginTop: 12 }}>
+                <button type="button" className="cta" onClick={jumpToPeak} style={{ width: "100%" }}>
+                  最大前傾フレームへジャンプ
+                </button>
+              </div>
             </div>
 
-            <div style={{ marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.8, opacity: 0.95 }}>
-              ✅ {result.message}
-            </div>
+            {/* ✅ ジャンプ先 */}
+            <div ref={peakRef} style={{ marginTop: 16 }}>
+              <div style={{ fontWeight: 900, marginBottom: 10 }}>最大前傾フレーム（自動抽出）</div>
 
-            <div style={{ marginTop: 14, display: "flex", gap: 10, alignItems: "center" }}>
-              <button
-                type="button"
-                onClick={jumpToPeak}
+              <div
                 style={{
-                  flex: 1,
+                  padding: 12,
                   borderRadius: 16,
-                  padding: "14px",
-                  fontWeight: 900,
-                  background: "rgba(90,160,255,0.9)",
-                  color: "#fff",
-                  border: "none",
+                  border: "1px solid rgba(255,255,255,0.12)",
+                  background: "rgba(0,0,0,0.25)",
                 }}
               >
-                最大前傾フレームへジャンプ
-              </button>
+                <div style={{ opacity: 0.9, lineHeight: 1.7 }}>
+                  <div>ピーク前傾：{result.peak.trunkLeanDeg.toFixed(1)}°</div>
+                  <div>ピーク時刻：{result.peak.t.toFixed(2)} sec</div>
+                  <div style={{ opacity: 0.75, marginTop: 6 }}>
+                    ※ボタンを押すとこの位置へスクロールし、動画もこの時刻へ移動します。
+                  </div>
+                </div>
+              </div>
             </div>
-
-            {/* ピーク静止画（作れた時だけ） */}
-            {result.peakInfo.thumbDataUrl && (
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontWeight: 900, marginBottom: 8 }}>最大前傾フレーム（自動抽出）</div>
-                <div
-                  style={{
-                    borderRadius: 18,
-                    overflow: "hidden",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    background: "#000",
-                  }}
-                >
-                  <img src={result.peakInfo.thumbDataUrl} alt="peak frame" style={{ width: "100%", display: "block" }} />
-                </div>
-              </div>
-            )}
-
-            {/* ✅ グラフ（見やすく） */}
-            {series.length > 3 && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontWeight: 900, marginBottom: 10 }}>グラフ</div>
-
-                <ChartBlock
-                  title="体幹前傾"
-                  unit="°"
-                  data={series.map((p) => p.m.trunkLeanDeg)}
-                  peakIndex={findPeakIndex(series.map((p) => p.m.trunkLeanDeg))}
-                  avgValue={avgOf(series.map((p) => p.m.trunkLeanDeg))}
-                />
-
-                <div style={{ height: 10 }} />
-
-                <ChartBlock
-                  title="股関節角"
-                  unit="°"
-                  data={series.map((p) => p.m.hipAngleDeg)}
-                  peakIndex={findPeakIndex(series.map((p) => p.m.hipAngleDeg))}
-                  avgValue={avgOf(series.map((p) => p.m.hipAngleDeg))}
-                />
-
-                <div style={{ height: 10 }} />
-
-                <ChartBlock
-                  title="膝角"
-                  unit="°"
-                  data={series.map((p) => p.m.kneeAngleDeg)}
-                  peakIndex={findPeakIndex(series.map((p) => p.m.kneeAngleDeg))}
-                  avgValue={avgOf(series.map((p) => p.m.kneeAngleDeg))}
-                />
-
-                <div style={{ marginTop: 10, opacity: 0.85, lineHeight: 1.6 }}>
-                  ✅ 青線=推移　●=ピーク　—=平均
-                  <br />
-                  ※ いまは「ピーク=最大値」。後で“スイング区間”限定にもできる。
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -551,111 +486,7 @@ export default function AnalyzeClient({ type }: { type: CatNum }) {
   );
 }
 
-/* ====== UI parts ====== */
-
-function Chip({ label }: { label: string }) {
-  return (
-    <div
-      style={{
-        padding: "8px 10px",
-        borderRadius: 999,
-        border: "1px solid rgba(255,255,255,0.18)",
-        background: "rgba(255,255,255,0.06)",
-        fontWeight: 800,
-        fontSize: 13,
-        opacity: 0.95,
-      }}
-    >
-      {label}
-    </div>
-  );
-}
-
-function ChartBlock({
-  title,
-  unit,
-  data,
-  peakIndex,
-  avgValue,
-}: {
-  title: string;
-  unit: string;
-  data: number[];
-  peakIndex: number;
-  avgValue: number;
-}) {
-  const w = 340;
-  const h = 120;
-  const pad = 10;
-
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const range = Math.max(1e-6, max - min);
-
-  const pts = data.map((v, i) => {
-    const x = pad + (i / Math.max(1, data.length - 1)) * (w - pad * 2);
-    const y = pad + (1 - (v - min) / range) * (h - pad * 2);
-    return { x, y };
-  });
-
-  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(" ");
-
-  const pPeak = pts[peakIndex] ?? pts[0];
-  const avgY = pad + (1 - (avgValue - min) / range) * (h - pad * 2);
-
-  return (
-    <div
-      style={{
-        padding: 12,
-        borderRadius: 18,
-        background: "rgba(0,0,0,0.18)",
-        border: "1px solid rgba(255,255,255,0.10)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <div style={{ fontWeight: 900 }}>{title}</div>
-        <div style={{ opacity: 0.85, fontWeight: 800, fontSize: 13 }}>
-          min {min.toFixed(1)}
-          {unit} / max {max.toFixed(1)}
-          {unit}
-        </div>
-      </div>
-
-      <svg viewBox={`0 0 ${w} ${h}`} style={{ width: "100%", height: 150, display: "block" }}>
-        {/* grid */}
-        <line x1={pad} y1={pad} x2={w - pad} y2={pad} stroke="rgba(255,255,255,0.06)" />
-        <line x1={pad} y1={h / 2} x2={w - pad} y2={h / 2} stroke="rgba(255,255,255,0.06)" />
-        <line x1={pad} y1={h - pad} x2={w - pad} y2={h - pad} stroke="rgba(255,255,255,0.06)" />
-
-        {/* avg dashed */}
-        <line
-          x1={pad}
-          y1={avgY}
-          x2={w - pad}
-          y2={avgY}
-          stroke="rgba(255,255,255,0.22)"
-          strokeDasharray="6 6"
-        />
-
-        {/* peak vertical */}
-        <line x1={pPeak.x} y1={pad} x2={pPeak.x} y2={h - pad} stroke="rgba(90,160,255,0.25)" />
-
-        {/* path */}
-        <path d={path} fill="none" stroke="rgba(90,255,230,0.95)" strokeWidth={3} strokeLinecap="round" />
-
-        {/* peak dot */}
-        <circle cx={pPeak.x} cy={pPeak.y} r={5} fill="rgba(90,255,230,1)" stroke="rgba(0,0,0,0.35)" />
-      </svg>
-
-      <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.9, fontWeight: 800, marginTop: 6 }}>
-        <div>平均: {avgValue.toFixed(1)}{unit}</div>
-        <div>ピーク: {data[peakIndex]?.toFixed(1)}{unit}</div>
-      </div>
-    </div>
-  );
-}
-
-/* ===== helper ===== */
+// ===== helper =====
 
 async function seekVideo(video: HTMLVideoElement, time: number) {
   return new Promise<void>((resolve, reject) => {
@@ -671,7 +502,7 @@ async function seekVideo(video: HTMLVideoElement, time: number) {
   });
 }
 
-function avgMetrics(list: PoseMetrics[]): PoseMetrics {
+function avgMetrics(list: PoseMetrics[]): Omit<PoseMetrics, "t"> {
   const n = list.length;
   const sum = list.reduce(
     (acc, m) => {
@@ -699,26 +530,7 @@ function peakMetrics(list: PoseMetrics[]): PoseMetrics {
   return best;
 }
 
-function findPeakSeries(series: SeriesPoint[]): SeriesPoint {
-  let best = series[0];
-  for (const p of series) {
-    if (p.m.trunkLeanDeg > best.m.trunkLeanDeg) best = p;
-  }
-  return best;
-}
-
-function findPeakIndex(data: number[]): number {
-  let idx = 0;
-  for (let i = 1; i < data.length; i++) if (data[i] > data[idx]) idx = i;
-  return idx;
-}
-
-function avgOf(data: number[]): number {
-  if (data.length === 0) return 0;
-  return data.reduce((a, b) => a + b, 0) / data.length;
-}
-
-function buildMessage(type: CatNum, avg: PoseMetrics, peak: PoseMetrics) {
+function buildMessage(type: CatNum, avg: Omit<PoseMetrics, "t">, peak: PoseMetrics) {
   const trunk = avg.trunkLeanDeg;
   const hip = avg.hipAngleDeg;
   const knee = avg.kneeAngleDeg;
